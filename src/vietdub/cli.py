@@ -5,6 +5,7 @@ import typer
 from .config import Settings
 from .jobs import Job, JobManager
 from .models import StepName
+from .pipeline import run_review_pipeline
 
 
 app = typer.Typer(help="Vietnamese dubbing pipeline for Chinese cartoon videos.")
@@ -28,9 +29,12 @@ def run(
     if not video.exists():
         raise typer.BadParameter(f"Video not found: {video}")
     settings = Settings()
-    job = JobManager(Path(settings.jobs_dir)).create(video, series=series)
-    typer.echo(f"Created job: {job.root}")
-    typer.echo("Full engine pipeline will run after Task 11 wires media, STT, OCR, translate, TTS, and render stages.")
+    job = run_review_pipeline(video=video, jobs_dir=Path(settings.jobs_dir), series=series, settings=settings)
+    typer.echo(f"Review file written: {job.root / 'translation' / 'review.csv'}")
+    if mode == "review":
+        typer.echo("Review mode stopped before TTS. Edit review.csv, then run: vietdub resume <job_dir> --from tts")
+    else:
+        typer.echo("Auto mode will continue through TTS/render after resume rendering is implemented.")
 
 
 @app.command()
