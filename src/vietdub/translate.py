@@ -47,26 +47,38 @@ def translate_with_llm(
 
     from openai import APIStatusError, AuthenticationError, OpenAI, OpenAIError
 
+    clean_base_url = base_url.rstrip("/")
+    use_responses_endpoint = clean_base_url.endswith("/responses")
     client_kwargs = {"api_key": api_key}
-    if base_url:
-        client_kwargs["base_url"] = base_url
+    if clean_base_url:
+        client_kwargs["base_url"] = clean_base_url.removesuffix("/responses") if use_responses_endpoint else clean_base_url
     client = OpenAI(**client_kwargs)
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a Vietnamese localization editor for Chinese comedy cartoons."},
-                {"role": "user", "content": build_translation_prompt(segments, context_bundle)},
-            ],
-            response_format={"type": "json_object"},
-        )
+        prompt = build_translation_prompt(segments, context_bundle)
+        if use_responses_endpoint:
+            response = client.responses.create(
+                model=model,
+                instructions="You are a Vietnamese localization editor for Chinese comedy cartoons.",
+                input=prompt,
+                text={"format": {"type": "json_object"}},
+            )
+            content = response.output_text or "{}"
+        else:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a Vietnamese localization editor for Chinese comedy cartoons."},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={"type": "json_object"},
+            )
+            content = response.choices[0].message.content or "{}"
     except AuthenticationError as exc:
         raise RuntimeError("OpenAI authentication failed; check OPENAI_API_KEY") from exc
     except APIStatusError as exc:
         raise RuntimeError(f"OpenAI request failed with HTTP {exc.status_code}") from exc
     except OpenAIError as exc:
         raise RuntimeError(f"OpenAI request failed: {exc.__class__.__name__}") from exc
-    content = response.choices[0].message.content or "{}"
     data = json.loads(content)
     return [TranslationRow.model_validate(item) for item in data["translations"]]
 
