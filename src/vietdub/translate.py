@@ -38,6 +38,7 @@ def translate_with_llm(
     context_bundle: dict,
     api_key: str,
     model: str,
+    base_url: str = "",
 ) -> list[TranslationRow]:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is required for translation")
@@ -46,7 +47,10 @@ def translate_with_llm(
 
     from openai import APIStatusError, AuthenticationError, OpenAI, OpenAIError
 
-    client = OpenAI(api_key=api_key)
+    client_kwargs = {"api_key": api_key}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+    client = OpenAI(**client_kwargs)
     try:
         response = client.chat.completions.create(
             model=model,

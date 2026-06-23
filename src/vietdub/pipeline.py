@@ -59,7 +59,13 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     ocr_segments = PaddleSubtitleOcrEngine().recognize(job.input_video)
     merged = merge_segments(stt_segments, ocr_segments)
     context_bundle = build_context_bundle(merged, series_context={})
-    translations = translate_with_llm(merged, context_bundle, typed_settings.openai_api_key, typed_settings.llm_model)
+    translations = translate_with_llm(
+        merged,
+        context_bundle,
+        typed_settings.openai_api_key,
+        typed_settings.llm_model,
+        typed_settings.openai_base_url,
+    )
 
     write_segments(job, "stt/segments.json", stt_segments)
     write_segments(job, "ocr/subtitles.json", ocr_segments)
