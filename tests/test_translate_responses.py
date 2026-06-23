@@ -24,7 +24,7 @@ class FakeResponses:
                             "text_cn": "\u4f60\u597d",
                             "text_vi": "Xin ch\u00e0o",
                             "context_note": "",
-                            "status": "draft",
+                            "status": "translated",
                         }
                     ]
                 }
@@ -81,3 +81,4 @@ def test_translate_with_llm_uses_responses_api_when_base_url_is_responses_endpoi
     assert client.responses.calls[0]["model"] == "test-model"
     assert "Translate Chinese cartoon dialogue" in client.responses.calls[0]["input"]
     assert rows[0].text_vi == "Xin ch\u00e0o"
+    assert rows[0].status == "draft"

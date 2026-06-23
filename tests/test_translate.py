@@ -1,5 +1,5 @@
 from vietdub.models import TimedSegment, TranslationRow
-from vietdub.translate import export_review_csv, import_review_csv
+from vietdub.translate import build_translation_prompt, export_review_csv, import_review_csv
 
 
 def test_review_csv_round_trip(tmp_path):
@@ -21,3 +21,13 @@ def test_review_csv_round_trip(tmp_path):
 
     assert loaded[0].segment_id == "m-0001"
     assert loaded[0].text_vi == "Ch\u00e0o nha"
+
+
+def test_translation_prompt_explicitly_requests_json_output():
+    prompt = build_translation_prompt(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="\u4f60\u597d")],
+        context_bundle={},
+    )
+
+    assert "Return JSON only" in prompt
+    assert "translations" in prompt

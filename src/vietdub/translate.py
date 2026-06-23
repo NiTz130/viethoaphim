@@ -18,10 +18,14 @@ CSV_FIELDS = [
     "status",
 ]
 
+ALLOWED_REVIEW_STATUSES = {"draft", "reviewed", "skip"}
+
 
 def build_translation_prompt(segments: list[TimedSegment], context_bundle: dict) -> str:
     payload = {
         "instructions": [
+            "Return JSON only with a top-level \"translations\" array.",
+            "Each translation must include segment_id, start_ms, end_ms, speaker, text_cn, text_vi, context_note, and status.",
             "Translate Chinese cartoon dialogue into natural Vietnamese.",
             "Use a silly, meme-friendly tone when the source is comedic.",
             "Keep Vietnamese lines short enough for dubbing timing.",
@@ -80,7 +84,12 @@ def translate_with_llm(
     except OpenAIError as exc:
         raise RuntimeError(f"OpenAI request failed: {exc.__class__.__name__}") from exc
     data = json.loads(content)
-    return [TranslationRow.model_validate(item) for item in data["translations"]]
+    rows: list[TranslationRow] = []
+    for item in data["translations"]:
+        if item.get("status") not in ALLOWED_REVIEW_STATUSES:
+            item["status"] = "draft"
+        rows.append(TranslationRow.model_validate(item))
+    return rows
 
 
 def export_review_csv(path: Path, segments: list[TimedSegment], translations: list[TranslationRow]) -> None:
