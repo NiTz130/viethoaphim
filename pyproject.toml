@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vietdub"
+version = "0.1.0"
+description = "Windows-first CLI for Chinese-to-Vietnamese cartoon dubbing"
+requires-python = ">=3.11"
+dependencies = [
+  "typer>=0.12.0",
+  "pydantic>=2.7.0",
+  "pydantic-settings>=2.2.0",
+  "python-dotenv>=1.0.1",
+  "openai>=1.40.0",
+  "edge-tts>=6.1.12",
+  "pydub>=0.25.1",
+  "faster-whisper>=1.0.3",
+  "paddleocr>=2.7.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2.0", "pytest-asyncio>=0.23.0"]
+
+[project.scripts]
+vietdub = "vietdub.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
