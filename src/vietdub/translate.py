@@ -44,17 +44,24 @@ def translate_with_llm(
     if not model:
         raise RuntimeError("LLM_MODEL is required for translation")
 
-    from openai import OpenAI
+    from openai import APIStatusError, AuthenticationError, OpenAI, OpenAIError
 
     client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": "You are a Vietnamese localization editor for Chinese comedy cartoons."},
-            {"role": "user", "content": build_translation_prompt(segments, context_bundle)},
-        ],
-        response_format={"type": "json_object"},
-    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a Vietnamese localization editor for Chinese comedy cartoons."},
+                {"role": "user", "content": build_translation_prompt(segments, context_bundle)},
+            ],
+            response_format={"type": "json_object"},
+        )
+    except AuthenticationError as exc:
+        raise RuntimeError("OpenAI authentication failed; check OPENAI_API_KEY") from exc
+    except APIStatusError as exc:
+        raise RuntimeError(f"OpenAI request failed with HTTP {exc.status_code}") from exc
+    except OpenAIError as exc:
+        raise RuntimeError(f"OpenAI request failed: {exc.__class__.__name__}") from exc
     content = response.choices[0].message.content or "{}"
     data = json.loads(content)
     return [TranslationRow.model_validate(item) for item in data["translations"]]

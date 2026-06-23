@@ -21,9 +21,18 @@ class FasterWhisperSttEngine:
         self.language = language
 
     def transcribe(self, audio_path: Path) -> list[TimedSegment]:
+        try:
+            return self._transcribe(audio_path, device="auto", compute_type="auto")
+        except RuntimeError as exc:
+            message = str(exc).lower()
+            if "cublas" not in message and "cuda" not in message:
+                raise
+            return self._transcribe(audio_path, device="cpu", compute_type="int8")
+
+    def _transcribe(self, audio_path: Path, device: str, compute_type: str) -> list[TimedSegment]:
         from faster_whisper import WhisperModel
 
-        model = WhisperModel(self.model_name, device="auto", compute_type="auto")
+        model = WhisperModel(self.model_name, device=device, compute_type=compute_type)
         segments, _info = model.transcribe(str(audio_path), language=self.language)
         result: list[TimedSegment] = []
         for index, segment in enumerate(segments, start=1):

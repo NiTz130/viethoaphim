@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import click
 import typer
 
 from .config import Settings
@@ -29,7 +30,10 @@ def run(
     if not video.exists():
         raise typer.BadParameter(f"Video not found: {video}")
     settings = Settings()
-    job = run_review_pipeline(video=video, jobs_dir=Path(settings.jobs_dir), series=series, settings=settings)
+    try:
+        job = run_review_pipeline(video=video, jobs_dir=Path(settings.jobs_dir), series=series, settings=settings)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from None
     typer.echo(f"Review file written: {job.root / 'translation' / 'review.csv'}")
     if mode == "review":
         typer.echo("Review mode stopped before TTS. Edit review.csv, then run: vietdub resume <job_dir> --from tts")

@@ -24,6 +24,6 @@ def test_srt_time_round_trip():
 def test_settings_defaults_without_api_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("LLM_MODEL", raising=False)
-    settings = Settings()
+    settings = Settings(_env_file=None)
     assert settings.llm_model == ""
     assert settings.edge_voice == "vi-VN-HoaiMyNeural"

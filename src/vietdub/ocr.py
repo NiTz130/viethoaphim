@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import sys
+import types
 from pathlib import Path
 
 from .models import TimedSegment
@@ -21,9 +24,11 @@ class PaddleSubtitleOcrEngine:
         self.sample_every_seconds = sample_every_seconds
 
     def recognize(self, video_path: Path) -> list[TimedSegment]:
+        os.environ.setdefault("FLAGS_use_mkldnn", "0")
+        _guard_optional_torch_import()
         from paddleocr import PaddleOCR
 
-        ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
+        ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False, use_gpu=False, enable_mkldnn=False)
         frame_dir = video_path.parent / "ocr_frames"
         frame_dir.mkdir(parents=True, exist_ok=True)
         pattern = frame_dir / "frame_%06d.jpg"
@@ -62,3 +67,22 @@ class PaddleSubtitleOcrEngine:
                     )
                 )
         return segments
+
+
+def _guard_optional_torch_import() -> None:
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        return
+    except OSError as exc:
+        message = str(exc).lower()
+        if "torch" not in message and "shm.dll" not in message:
+            raise
+        torch_stub = types.ModuleType("torch")
+        torch_stub.Tensor = object
+
+        def _missing_torch(*args, **kwargs):
+            raise RuntimeError("PyTorch tensor transforms are unavailable in this environment")
+
+        torch_stub.from_numpy = _missing_torch
+        sys.modules["torch"] = torch_stub
