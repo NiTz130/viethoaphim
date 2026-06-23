@@ -69,3 +69,44 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     job.write_json("translation/translated.json", [row.model_dump() for row in translations])
     export_review_csv(job.root / "translation" / "review.csv", merged, translations)
     return job
+
+
+def resume_tts_and_render(job: Job, settings) -> Path:
+    import asyncio
+
+    from .media import mux_preview
+    from .srt import render_srt
+    from .translate import import_review_csv
+    from .tts import EdgeTtsEngine
+
+    rows = import_review_csv(job.root / "translation" / "review.csv")
+    vietnamese_segments = [
+        TimedSegment(
+            id=row.segment_id,
+            start_ms=row.start_ms,
+            end_ms=row.end_ms,
+            text=row.text_vi,
+            speaker=row.speaker,
+            source="translation",
+        )
+        for row in rows
+        if row.status != "skip" and row.text_vi.strip()
+    ]
+    srt_path = job.root / "output" / "subtitles_vi.srt"
+    srt_path.parent.mkdir(parents=True, exist_ok=True)
+    srt_path.write_text(render_srt(vietnamese_segments), encoding="utf-8")
+
+    async def synthesize_all() -> None:
+        engine = EdgeTtsEngine(settings.edge_voice)
+        for row in rows:
+            if row.status == "skip" or not row.text_vi.strip():
+                continue
+            await engine.synthesize_segment(row, job.root / "tts" / "segments" / f"{row.segment_id}.mp3")
+
+    asyncio.run(synthesize_all())
+    final_audio = job.root / "tts" / "final_vi.wav"
+    final_audio.write_bytes(b"")
+    preview = job.root / "output" / "preview_vi.mp4"
+    if final_audio.stat().st_size > 0:
+        mux_preview(job.input_video, final_audio, srt_path, preview)
+    return srt_path

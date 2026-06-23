@@ -42,7 +42,15 @@ def resume(
     job_dir: Path,
     from_step: StepName = typer.Option(..., "--from", help="Step to resume from."),
 ) -> None:
-    job = _open_job(job_dir, Path("jobs"))
+    settings = Settings()
+    job = _open_job(job_dir, Path(settings.jobs_dir))
+    if from_step == StepName.TTS:
+        from .pipeline import resume_tts_and_render
+
+        srt_path = resume_tts_and_render(job, settings)
+        typer.echo(f"Vietnamese subtitles written: {srt_path}")
+        typer.echo("TTS segment files written under tts/segments.")
+        return
     steps = ", ".join(step.value for step in job.steps_from(from_step))
     typer.echo(f"Resume order: {steps}")
 
