@@ -315,6 +315,10 @@ def test_resume_tts_clears_stale_render_state_before_segment_validation(tmp_path
     preview = job_root / "output" / "preview_vi.mp4"
     preview.parent.mkdir(parents=True)
     preview.write_bytes(b"old-preview")
+    srt_path = job_root / "output" / "subtitles_vi.srt"
+    srt_path.write_text("old-subtitles", encoding="utf-8")
+    sync_report_path = job_root / "tts" / "sync_report.json"
+    sync_report_path.write_text(json.dumps({"old": True}), encoding="utf-8")
     job = Job(root=job_root, config={})
     job.write_json(
         "status.json",
@@ -333,7 +337,8 @@ def test_resume_tts_clears_stale_render_state_before_segment_validation(tmp_path
     assert "render" not in status
     assert not final_audio.exists()
     assert not preview.exists()
-    assert not (job_root / "output" / "subtitles_vi.srt").exists()
+    assert not srt_path.exists()
+    assert not sync_report_path.exists()
 
 
 def test_resume_tts_rejects_unknown_transcript_segment_id(tmp_path):

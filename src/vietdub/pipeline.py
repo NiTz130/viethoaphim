@@ -194,13 +194,17 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     from .translate import import_review_csv
     from .tts import EdgeTtsEngine
 
+    srt_path = job.root / "output" / "subtitles_vi.srt"
     final_audio = job.root / "tts" / "final_vi.wav"
+    sync_report_path = job.root / "tts" / "sync_report.json"
     preview = job.root / "output" / "preview_vi.mp4"
     status = job.load_status()
     if StepName.RENDER.value in status:
         del status[StepName.RENDER.value]
         job.write_json("status.json", status)
+    srt_path.unlink(missing_ok=True)
     final_audio.unlink(missing_ok=True)
+    sync_report_path.unlink(missing_ok=True)
     preview.unlink(missing_ok=True)
 
     rows = import_review_csv(job.root / "translation" / "review.csv")
@@ -217,7 +221,6 @@ def resume_tts_and_render(job: Job, settings) -> Path:
         for row in rows
         if row.status != "skip" and row.text_vi.strip()
     ]
-    srt_path = job.root / "output" / "subtitles_vi.srt"
     srt_path.parent.mkdir(parents=True, exist_ok=True)
     srt_path.write_text(render_srt(vietnamese_segments), encoding="utf-8")
 
@@ -245,7 +248,6 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     warning_count = asyncio.run(synthesize_all())
     job.mark_done(StepName.TTS, {"segments": len(vietnamese_segments), "warnings": warning_count})
 
-    sync_report_path = job.root / "tts" / "sync_report.json"
     try:
         sync_report = assemble_final_audio(
             rows=rows,
