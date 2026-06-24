@@ -229,9 +229,12 @@ def resume_tts_and_render(job: Job, settings) -> Path:
         for row in rows:
             if row.status == "skip" or not row.text_vi.strip():
                 continue
+            segment_audio = job.root / "tts" / "segments" / f"{row.segment_id}.mp3"
+            segment_audio.unlink(missing_ok=True)
             try:
-                await engine.synthesize_segment(row, job.root / "tts" / "segments" / f"{row.segment_id}.mp3")
+                await engine.synthesize_segment(row, segment_audio)
             except Exception as exc:  # noqa: BLE001 - keep subtitle output even if one TTS request fails.
+                segment_audio.unlink(missing_ok=True)
                 warnings.append({"segment_id": row.segment_id, "error": str(exc)})
         if warnings:
             warning_path.parent.mkdir(parents=True, exist_ok=True)

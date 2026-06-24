@@ -149,6 +149,40 @@ def test_resume_tts_and_render_keeps_srt_when_tts_segment_fails(monkeypatch, tmp
     assert mux_calls == []
 
 
+def test_resume_tts_and_render_removes_stale_segment_audio_when_retry_fails(monkeypatch, tmp_path):
+    job_root = tmp_path / "job"
+    review = job_root / "translation" / "review.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-0001,0,1000,,\u4f60\u597d,Xin ch\u00e0o,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    segment_audio = job_root / "tts" / "segments" / "m-0001.mp3"
+    _write_valid_mp3(segment_audio, duration_ms=400)
+    final_audio = job_root / "tts" / "final_vi.wav"
+    preview = job_root / "output" / "preview_vi.mp4"
+    job = Job(root=job_root, config={})
+    mux_calls = _patch_resume_media(monkeypatch)
+
+    async def fail_synthesize_segment(self, row, output):
+        output.write_bytes(b"partial retry audio")
+        raise RuntimeError("tts failed")
+
+    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+
+    with pytest.raises(RuntimeError, match="No valid TTS segment audio"):
+        resume_tts_and_render(job, _resume_settings())
+
+    assert not segment_audio.exists()
+    assert not final_audio.exists()
+    assert not preview.exists()
+    status = json.loads((job_root / "status.json").read_text(encoding="utf-8"))
+    assert "render" not in status
+    assert mux_calls == []
+
+
 def test_resume_tts_and_render_removes_stale_outputs_when_assembly_fails(monkeypatch, tmp_path):
     job_root = tmp_path / "job"
     review = job_root / "translation" / "review.csv"
