@@ -18,9 +18,7 @@ def safe_echo(message: object) -> None:
 
 
 def _open_job(job_dir: Path, jobs_dir: Path) -> Job:
-    candidate = job_dir
-    if not candidate.exists() and not candidate.is_absolute():
-        candidate = jobs_dir / job_dir
+    candidate = jobs_dir / job_dir if not job_dir.is_absolute() and len(job_dir.parts) == 1 else job_dir
     try:
         return JobManager(jobs_dir).open(candidate)
     except FileNotFoundError as exc:
@@ -46,7 +44,10 @@ def run(
     if mode == "review":
         safe_echo("Review mode stopped before TTS. Edit review.csv, then run: vietdub resume <job_dir> --from tts")
     else:
-        srt_path = resume_tts_and_render(job, settings)
+        try:
+            srt_path = resume_tts_and_render(job, settings)
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from None
         safe_echo(f"Vietnamese subtitles written: {srt_path}")
         safe_echo("TTS segment files written under tts/segments.")
 

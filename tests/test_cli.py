@@ -61,6 +61,32 @@ def test_run_auto_resumes_tts_and_render(monkeypatch, tmp_path):
     assert "Vietnamese subtitles written" in result.output
 
 
+def test_run_auto_runtime_error_is_click_error(monkeypatch, tmp_path):
+    from vietdub import cli
+    from vietdub.jobs import Job
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake-video")
+    job_root = tmp_path / "jobs" / "clip"
+    job_root.mkdir(parents=True)
+    job = Job(root=job_root, config={})
+
+    def fake_run_review_pipeline(video, jobs_dir, series, settings):
+        return job
+
+    def fail_resume(job_arg, settings):
+        raise RuntimeError("bad tts")
+
+    monkeypatch.setattr(cli, "run_review_pipeline", fake_run_review_pipeline)
+    monkeypatch.setattr(cli, "resume_tts_and_render", fail_resume)
+
+    result = runner.invoke(app, ["run", str(video), "--mode", "auto"])
+
+    assert result.exit_code != 0
+    assert "bad tts" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_resume_runtime_error_is_click_error(monkeypatch, tmp_path):
     from vietdub import cli
     from vietdub.jobs import Job
@@ -97,3 +123,25 @@ def test_inspect_opens_bare_job_name_from_configured_jobs_dir(monkeypatch, tmp_p
     assert result.exit_code == 0
     assert str(job_root) in result.output
     assert "extract" in result.output
+
+
+def test_inspect_bare_job_name_uses_configured_jobs_dir_over_local_dir(monkeypatch, tmp_path):
+    jobs_dir = tmp_path / "configured-jobs"
+    job_root = jobs_dir / "clip"
+    job_root.mkdir(parents=True)
+    (job_root / "job.json").write_text('{"series": null}', encoding="utf-8")
+    (job_root / "status.json").write_text('{"extract": {"state": "done"}}', encoding="utf-8")
+    local_clip = tmp_path / "clip"
+    local_clip.mkdir()
+    (local_clip / "job.json").write_text('{"series": "local"}', encoding="utf-8")
+    (local_clip / "status.json").write_text('{"extract": {"state": "local"}}', encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("JOBS_DIR", str(jobs_dir))
+
+    result = runner.invoke(app, ["inspect", "clip"])
+
+    assert result.exit_code == 0
+    assert str(job_root) in result.output
+    assert str(local_clip) not in result.output
+    assert "done" in result.output
