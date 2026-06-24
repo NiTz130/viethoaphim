@@ -152,6 +152,108 @@ def test_resume_tts_rejects_unknown_transcript_segment_id(tmp_path):
         raise AssertionError("expected unknown segment_id failure")
 
 
+def test_resume_tts_rejects_transcript_path_traversal_segment_id(monkeypatch, tmp_path):
+    job_root = tmp_path / "job"
+    unsafe_id = "..\\evil"
+    review = job_root / "translation" / "review.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        f"{unsafe_id},0,1000,,\u4f60\u597d,Xin chao,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    (job_root / "transcript").mkdir()
+    (job_root / "transcript" / "merged.json").write_text(
+        json.dumps([{"id": unsafe_id, "start_ms": 0, "end_ms": 1000, "text": "\u4f60\u597d", "source": "ocr"}]),
+        encoding="utf-8",
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    job = Job(root=job_root, config={})
+    called = False
+
+    async def fail_synthesize_segment(self, row, output):
+        nonlocal called
+        called = True
+        raise AssertionError("synthesis should not run for unsafe segment_id")
+
+    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+
+    try:
+        resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+    except RuntimeError as exc:
+        assert "Invalid segment_id" in str(exc)
+    else:
+        raise AssertionError("expected invalid segment_id failure")
+
+    assert not called
+    assert not (job_root / "tts" / "evil.mp3").exists()
+
+
+def test_resume_tts_rejects_transcript_windows_absolute_segment_id(monkeypatch, tmp_path):
+    job_root = tmp_path / "job"
+    unsafe_id = "C:\\temp\\evil"
+    review = job_root / "translation" / "review.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        f"{unsafe_id},0,1000,,\u4f60\u597d,Xin chao,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    (job_root / "transcript").mkdir()
+    (job_root / "transcript" / "merged.json").write_text(
+        json.dumps([{"id": unsafe_id, "start_ms": 0, "end_ms": 1000, "text": "\u4f60\u597d", "source": "ocr"}]),
+        encoding="utf-8",
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    job = Job(root=job_root, config={})
+    called = False
+
+    async def fail_synthesize_segment(self, row, output):
+        nonlocal called
+        called = True
+        raise AssertionError("synthesis should not run for unsafe segment_id")
+
+    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+
+    try:
+        resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+    except RuntimeError as exc:
+        assert "Invalid segment_id" in str(exc)
+    else:
+        raise AssertionError("expected invalid segment_id failure")
+
+    assert not called
+
+
+def test_resume_tts_clears_stale_warning_count_after_success(monkeypatch, tmp_path):
+    job_root = tmp_path / "job"
+    review = job_root / "translation" / "review.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-0001,0,1000,,\u4f60\u597d,Xin chao,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    warning_path = job_root / "tts" / "tts_warnings.json"
+    warning_path.parent.mkdir(parents=True)
+    warning_path.write_text(json.dumps([{"segment_id": "old", "error": "old failure"}]), encoding="utf-8")
+    (job_root / "input.mp4").write_bytes(b"fake")
+    job = Job(root=job_root, config={})
+
+    async def fake_synthesize_segment(self, row, output):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"mp3")
+        return output
+
+    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
+
+    resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+
+    status = json.loads((job_root / "status.json").read_text(encoding="utf-8"))
+    assert status["tts"]["details"]["warnings"] == 0
+    assert not warning_path.exists()
+
+
 def test_review_pipeline_writes_selected_system_memory(monkeypatch, tmp_path):
     from vietdub.memory import MemoryWarningItem, SystemMemory, TranslationExample
     from vietdub.pipeline import run_review_pipeline

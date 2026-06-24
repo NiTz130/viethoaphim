@@ -133,10 +133,16 @@ def _load_allowed_segment_ids(job: Job) -> set[str] | None:
     return allowed
 
 
-def _is_safe_fallback_segment_id(segment_id: str) -> bool:
+def _is_safe_segment_path_component(segment_id: str) -> bool:
     if not segment_id:
         return False
     if "/" in segment_id or "\\" in segment_id or ":" in segment_id:
+        return False
+    return True
+
+
+def _is_safe_fallback_segment_id(segment_id: str) -> bool:
+    if not _is_safe_segment_path_component(segment_id):
         return False
     return SAFE_SEGMENT_ID_RE.fullmatch(segment_id) is not None
 
@@ -148,6 +154,8 @@ def _validate_resume_segment_ids(job: Job, rows: list[TranslationRow]) -> None:
         if row.status == "skip" or not row.text_vi.strip():
             continue
         segment_id = row.segment_id
+        if not _is_safe_segment_path_component(segment_id):
+            raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r}")
         if allowed_ids is not None:
             if segment_id not in allowed_ids:
                 raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r} is not in transcript/merged.json")
@@ -183,9 +191,10 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     srt_path.write_text(render_srt(vietnamese_segments), encoding="utf-8")
     job.mark_done(StepName.RENDER, {"subtitles": str(srt_path), "segments": len(vietnamese_segments)})
 
-    async def synthesize_all() -> None:
+    async def synthesize_all() -> int:
         engine = EdgeTtsEngine(settings.edge_voice)
         warnings: list[dict[str, str]] = []
+        warning_path = job.root / "tts" / "tts_warnings.json"
         for row in rows:
             if row.status == "skip" or not row.text_vi.strip():
                 continue
@@ -194,18 +203,13 @@ def resume_tts_and_render(job: Job, settings) -> Path:
             except Exception as exc:  # noqa: BLE001 - keep subtitle output even if one TTS request fails.
                 warnings.append({"segment_id": row.segment_id, "error": str(exc)})
         if warnings:
-            warning_path = job.root / "tts" / "tts_warnings.json"
             warning_path.parent.mkdir(parents=True, exist_ok=True)
             warning_path.write_text(json.dumps(warnings, ensure_ascii=False, indent=2), encoding="utf-8")
+        elif warning_path.exists():
+            warning_path.unlink()
+        return len(warnings)
 
-    asyncio.run(synthesize_all())
-    warnings_path = job.root / "tts" / "tts_warnings.json"
-    warning_count = 0
-    if warnings_path.exists():
-        try:
-            warning_count = len(json.loads(warnings_path.read_text(encoding="utf-8")))
-        except json.JSONDecodeError:
-            warning_count = 1
+    warning_count = asyncio.run(synthesize_all())
     job.mark_done(StepName.TTS, {"segments": len(vietnamese_segments), "warnings": warning_count})
     final_audio = job.root / "tts" / "final_vi.wav"
     final_audio.write_bytes(b"")
