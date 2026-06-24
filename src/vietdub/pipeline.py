@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 
@@ -169,14 +170,17 @@ def _probe_video_duration_ms(job: Job) -> int | None:
 
     try:
         metadata = probe_media(job.input_video)
-    except RuntimeError:
+    except (RuntimeError, OSError, ValueError):
         return None
-    duration = metadata.get("format", {}).get("duration")
+    format_metadata = metadata.get("format") if isinstance(metadata, dict) else None
+    if not isinstance(format_metadata, dict):
+        return None
+    duration = format_metadata.get("duration")
     try:
         duration_seconds = float(duration)
     except (TypeError, ValueError):
         return None
-    if duration_seconds <= 0:
+    if not math.isfinite(duration_seconds) or duration_seconds <= 0:
         return None
     return int(duration_seconds * 1000)
 
@@ -207,7 +211,16 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     srt_path = job.root / "output" / "subtitles_vi.srt"
     srt_path.parent.mkdir(parents=True, exist_ok=True)
     srt_path.write_text(render_srt(vietnamese_segments), encoding="utf-8")
-    job.mark_done(StepName.RENDER, {"subtitles": str(srt_path), "segments": len(vietnamese_segments)})
+
+    status = job.load_status()
+    if StepName.RENDER.value in status:
+        del status[StepName.RENDER.value]
+        job.write_json("status.json", status)
+
+    final_audio = job.root / "tts" / "final_vi.wav"
+    preview = job.root / "output" / "preview_vi.mp4"
+    final_audio.unlink(missing_ok=True)
+    preview.unlink(missing_ok=True)
 
     async def synthesize_all() -> int:
         engine = EdgeTtsEngine(settings.edge_voice)
@@ -230,21 +243,31 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     warning_count = asyncio.run(synthesize_all())
     job.mark_done(StepName.TTS, {"segments": len(vietnamese_segments), "warnings": warning_count})
 
-    final_audio = job.root / "tts" / "final_vi.wav"
     sync_report_path = job.root / "tts" / "sync_report.json"
-    sync_report = assemble_final_audio(
-        rows=rows,
-        segment_dir=job.root / "tts" / "segments",
-        output_audio=final_audio,
-        sample_rate=settings.sample_rate,
-        video_duration_ms=_probe_video_duration_ms(job),
-        sync_report_path=sync_report_path,
-    )
+    try:
+        sync_report = assemble_final_audio(
+            rows=rows,
+            segment_dir=job.root / "tts" / "segments",
+            output_audio=final_audio,
+            sample_rate=settings.sample_rate,
+            video_duration_ms=_probe_video_duration_ms(job),
+            sync_report_path=sync_report_path,
+        )
+    except Exception:  # noqa: BLE001 - do not leave stale render artifacts after a failed resume.
+        final_audio.unlink(missing_ok=True)
+        preview.unlink(missing_ok=True)
+        raise
     if not final_audio.exists() or final_audio.stat().st_size == 0:
+        final_audio.unlink(missing_ok=True)
+        preview.unlink(missing_ok=True)
         raise RuntimeError(f"Final audio was not created: {final_audio}")
 
-    preview = job.root / "output" / "preview_vi.mp4"
-    mux_preview(job.input_video, final_audio, srt_path, preview)
+    preview.unlink(missing_ok=True)
+    try:
+        mux_preview(job.input_video, final_audio, srt_path, preview)
+    except Exception:  # noqa: BLE001 - do not leave stale or partial previews after mux failure.
+        preview.unlink(missing_ok=True)
+        raise
     synced_segments = sum(1 for segment in sync_report.segments if segment.synced_duration_ms > 0)
     skipped_segments = sum(1 for segment in sync_report.segments if segment.synced_duration_ms == 0)
     job.mark_done(

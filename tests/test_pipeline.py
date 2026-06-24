@@ -1,10 +1,11 @@
 import json
 
+import pytest
 from pydub.generators import Sine
 
 from vietdub.models import TimedSegment
 from vietdub.jobs import Job
-from vietdub.pipeline import resume_tts_and_render, run_fixture_pipeline
+from vietdub.pipeline import _probe_video_duration_ms, resume_tts_and_render, run_fixture_pipeline
 from vietdub.srt import render_srt
 
 
@@ -123,7 +124,7 @@ def test_resume_tts_and_render_keeps_srt_when_tts_segment_fails(monkeypatch, tmp
     )
     (tmp_path / "job" / "input.mp4").write_bytes(b"fake")
     job = Job(root=tmp_path / "job", config={})
-    _patch_resume_media(monkeypatch)
+    mux_calls = _patch_resume_media(monkeypatch)
 
     async def fail_synthesize_segment(self, row, output):
         raise RuntimeError("tts failed")
@@ -143,6 +144,96 @@ def test_resume_tts_and_render_keeps_srt_when_tts_segment_fails(monkeypatch, tmp
     assert "m-0001" in report
     sync_report = json.loads((tmp_path / "job" / "tts" / "sync_report.json").read_text(encoding="utf-8"))
     assert "missing TTS audio" in sync_report["segments"][0]["warnings"][0]
+    status = json.loads((tmp_path / "job" / "status.json").read_text(encoding="utf-8"))
+    assert "render" not in status
+    assert mux_calls == []
+
+
+def test_resume_tts_and_render_removes_stale_outputs_when_assembly_fails(monkeypatch, tmp_path):
+    job_root = tmp_path / "job"
+    review = job_root / "translation" / "review.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-0001,0,1000,,\u4f60\u597d,Xin ch\u00e0o,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    final_audio = job_root / "tts" / "final_vi.wav"
+    final_audio.parent.mkdir(parents=True)
+    final_audio.write_bytes(b"old-final-audio")
+    preview = job_root / "output" / "preview_vi.mp4"
+    preview.parent.mkdir(parents=True)
+    preview.write_bytes(b"old-preview")
+    job = Job(root=job_root, config={})
+    job.write_json(
+        "status.json",
+        {
+            "render": {
+                "state": "done",
+                "details": {"final_audio": str(final_audio), "preview": str(preview)},
+            }
+        },
+    )
+    mux_calls = _patch_resume_media(monkeypatch)
+
+    async def fail_synthesize_segment(self, row, output):
+        raise RuntimeError("tts failed")
+
+    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+
+    try:
+        resume_tts_and_render(job, _resume_settings())
+    except RuntimeError as exc:
+        assert "No valid TTS segment audio" in str(exc)
+    else:
+        raise AssertionError("expected final audio assembly failure")
+
+    assert "Xin ch\u00e0o" in (job_root / "output" / "subtitles_vi.srt").read_text(encoding="utf-8")
+    assert not final_audio.exists()
+    assert not preview.exists()
+    status = json.loads((job_root / "status.json").read_text(encoding="utf-8"))
+    assert "render" not in status
+    assert mux_calls == []
+
+
+@pytest.mark.parametrize("exception_type", [RuntimeError, OSError, ValueError])
+def test_probe_video_duration_ms_returns_none_for_probe_exception(monkeypatch, tmp_path, exception_type):
+    job_root = tmp_path / "job"
+    job_root.mkdir()
+    job = Job(root=job_root, config={})
+
+    def fail_probe_media(video_path):
+        raise exception_type("probe failed")
+
+    monkeypatch.setattr("vietdub.media.probe_media", fail_probe_media)
+
+    assert _probe_video_duration_ms(job) is None
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ("not a dict", None),
+        ({"format": "not a dict"}, None),
+        ({"format": {}}, None),
+        ({"format": {"duration": "not-a-number"}}, None),
+        ({"format": {"duration": "0"}}, None),
+        ({"format": {"duration": "-1.25"}}, None),
+        ({"format": {"duration": "1.234"}}, 1234),
+    ],
+)
+def test_probe_video_duration_ms_handles_invalid_and_valid_duration_metadata(monkeypatch, tmp_path, metadata, expected):
+    job_root = tmp_path / "job"
+    job_root.mkdir()
+    job = Job(root=job_root, config={})
+
+    def fake_probe_media(video_path):
+        return metadata
+
+    monkeypatch.setattr("vietdub.media.probe_media", fake_probe_media)
+
+    assert _probe_video_duration_ms(job) == expected
 
 
 def test_resume_tts_rejects_path_traversal_segment_id(monkeypatch, tmp_path):
