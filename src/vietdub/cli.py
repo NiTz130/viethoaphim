@@ -12,6 +12,11 @@ from .pipeline import run_review_pipeline
 app = typer.Typer(help="Vietnamese dubbing pipeline for Chinese cartoon videos.")
 
 
+def safe_echo(message: object) -> None:
+    text = str(message)
+    typer.echo(text.encode("ascii", errors="replace").decode("ascii"))
+
+
 def _open_job(job_dir: Path, jobs_dir: Path) -> Job:
     try:
         return JobManager(jobs_dir).open(job_dir)
@@ -34,11 +39,11 @@ def run(
         job = run_review_pipeline(video=video, jobs_dir=Path(settings.jobs_dir), series=series, settings=settings)
     except RuntimeError as exc:
         raise click.ClickException(str(exc)) from None
-    typer.echo(f"Review file written: {job.root / 'translation' / 'review.csv'}")
+    safe_echo(f"Review file written: {job.root / 'translation' / 'review.csv'}")
     if mode == "review":
-        typer.echo("Review mode stopped before TTS. Edit review.csv, then run: vietdub resume <job_dir> --from tts")
+        safe_echo("Review mode stopped before TTS. Edit review.csv, then run: vietdub resume <job_dir> --from tts")
     else:
-        typer.echo("Auto mode will continue through TTS/render after resume rendering is implemented.")
+        safe_echo("Auto mode will continue through TTS/render after resume rendering is implemented.")
 
 
 @app.command()
@@ -52,18 +57,18 @@ def resume(
         from .pipeline import resume_tts_and_render
 
         srt_path = resume_tts_and_render(job, settings)
-        typer.echo(f"Vietnamese subtitles written: {srt_path}")
-        typer.echo("TTS segment files written under tts/segments.")
+        safe_echo(f"Vietnamese subtitles written: {srt_path}")
+        safe_echo("TTS segment files written under tts/segments.")
         return
     steps = ", ".join(step.value for step in job.steps_from(from_step))
-    typer.echo(f"Resume order: {steps}")
+    safe_echo(f"Resume order: {steps}")
 
 
 @app.command()
 def inspect(job_dir: Path) -> None:
     job = _open_job(job_dir, Path("jobs"))
-    typer.echo(job.root)
-    typer.echo(job.load_status())
+    safe_echo(job.root)
+    safe_echo(job.load_status())
 
 
 def main() -> None:

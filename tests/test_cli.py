@@ -18,3 +18,14 @@ def test_inspect_missing_job_returns_error():
     result = runner.invoke(app, ["inspect", "missing-job"])
     assert result.exit_code != 0
     assert "Job directory not found" in result.output
+
+
+def test_safe_echo_handles_non_ascii_path(monkeypatch):
+    from vietdub import cli
+
+    captured = []
+    monkeypatch.setattr(cli.typer, "echo", captured.append)
+
+    cli.safe_echo("jobs\\T\u1eadp 1\\translation\\review.csv")
+
+    assert captured == ["jobs\\T?p 1\\translation\\review.csv"]
