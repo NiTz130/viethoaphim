@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .context import build_context_bundle
@@ -106,10 +107,18 @@ def resume_tts_and_render(job: Job, settings) -> Path:
 
     async def synthesize_all() -> None:
         engine = EdgeTtsEngine(settings.edge_voice)
+        warnings: list[dict[str, str]] = []
         for row in rows:
             if row.status == "skip" or not row.text_vi.strip():
                 continue
-            await engine.synthesize_segment(row, job.root / "tts" / "segments" / f"{row.segment_id}.mp3")
+            try:
+                await engine.synthesize_segment(row, job.root / "tts" / "segments" / f"{row.segment_id}.mp3")
+            except Exception as exc:  # noqa: BLE001 - keep subtitle output even if one TTS request fails.
+                warnings.append({"segment_id": row.segment_id, "error": str(exc)})
+        if warnings:
+            warning_path = job.root / "tts" / "tts_warnings.json"
+            warning_path.parent.mkdir(parents=True, exist_ok=True)
+            warning_path.write_text(json.dumps(warnings, ensure_ascii=False, indent=2), encoding="utf-8")
 
     asyncio.run(synthesize_all())
     final_audio = job.root / "tts" / "final_vi.wav"

@@ -6,7 +6,7 @@ import typer
 from .config import Settings
 from .jobs import Job, JobManager
 from .models import StepName
-from .pipeline import run_review_pipeline
+from .pipeline import resume_tts_and_render, run_review_pipeline
 
 
 app = typer.Typer(help="Vietnamese dubbing pipeline for Chinese cartoon videos.")
@@ -43,7 +43,9 @@ def run(
     if mode == "review":
         safe_echo("Review mode stopped before TTS. Edit review.csv, then run: vietdub resume <job_dir> --from tts")
     else:
-        safe_echo("Auto mode will continue through TTS/render after resume rendering is implemented.")
+        srt_path = resume_tts_and_render(job, settings)
+        safe_echo(f"Vietnamese subtitles written: {srt_path}")
+        safe_echo("TTS segment files written under tts/segments.")
 
 
 @app.command()
@@ -54,8 +56,6 @@ def resume(
     settings = Settings()
     job = _open_job(job_dir, Path(settings.jobs_dir))
     if from_step == StepName.TTS:
-        from .pipeline import resume_tts_and_render
-
         srt_path = resume_tts_and_render(job, settings)
         safe_echo(f"Vietnamese subtitles written: {srt_path}")
         safe_echo("TTS segment files written under tts/segments.")
