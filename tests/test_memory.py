@@ -132,6 +132,52 @@ def test_collect_system_memory_records_json_warning_and_continues(tmp_path):
     assert "Invalid JSON" in memory.warnings[0].message
 
 
+def test_collect_system_memory_skips_character_with_bad_confidence(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    job = jobs_dir / "old"
+    (job / "context").mkdir(parents=True)
+    (job / "context" / "characters.json").write_text(
+        json.dumps(
+            [
+                {"name_cn": "\\u574f", "name_vi": "Hong", "confidence": "bad"},
+                {"name_cn": "\\u597d", "name_vi": "Tot", "confidence": 0.9},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    memory = collect_system_memory(jobs_dir)
+
+    assert [item.name_cn for item in memory.characters] == ["\\u597d"]
+    assert len(memory.warnings) == 1
+    assert "characters.json" in memory.warnings[0].path
+    assert "confidence" in memory.warnings[0].message
+
+
+def test_collect_system_memory_skips_glossary_entry_with_bad_confidence(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    job = jobs_dir / "old"
+    (job / "context").mkdir(parents=True)
+    (job / "context" / "glossary.json").write_text(
+        json.dumps(
+            {
+                "\\u574f": {"target": "hong", "confidence": "bad"},
+                "\\u597d": {"target": "tot", "confidence": 0.9},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    memory = collect_system_memory(jobs_dir)
+
+    assert [item.source_text for item in memory.glossary] == ["\\u597d"]
+    assert len(memory.warnings) == 1
+    assert "glossary.json" in memory.warnings[0].path
+    assert "confidence" in memory.warnings[0].message
+
+
 from vietdub.memory import (
     MemoryCharacter,
     MemoryGlossaryEntry,

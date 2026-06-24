@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -166,6 +167,9 @@ def _collect_characters_json(
         name_vi = str(item.get("name_vi") or "").strip()
         if not name_cn or not name_vi:
             continue
+        confidence = _parse_confidence(item.get("confidence"), 0.80, path, warnings, name_cn)
+        if confidence is None:
+            continue
         _put_character(
             characters,
             MemoryCharacter(
@@ -173,7 +177,7 @@ def _collect_characters_json(
                 name_vi=name_vi,
                 source_job=job_dir.name,
                 source="context/characters.json",
-                confidence=float(item.get("confidence") or 0.80),
+                confidence=confidence,
             ),
         )
 
@@ -192,8 +196,8 @@ def _collect_glossary_json(
         return
     for source_text, raw_target in data.items():
         source = str(source_text).strip()
-        target, confidence = _glossary_target_and_confidence(raw_target, 0.80)
-        if not source or not target:
+        target, confidence = _glossary_target_and_confidence(raw_target, 0.80, path, warnings, source)
+        if not source or not target or confidence is None:
             continue
         _put_glossary(
             glossary,
@@ -266,10 +270,36 @@ def _load_json(path: Path, warnings: list[MemoryWarningItem]) -> Any | None:
     return None
 
 
-def _glossary_target_and_confidence(raw_target: Any, default_confidence: float) -> tuple[str, float]:
+def _parse_confidence(
+    raw_value: Any,
+    default_confidence: float,
+    path: Path,
+    warnings: list[MemoryWarningItem],
+    label: str,
+) -> float | None:
+    if raw_value is None or raw_value == "":
+        return default_confidence
+    try:
+        confidence = float(raw_value)
+    except (TypeError, ValueError):
+        warnings.append(MemoryWarningItem(path=str(path), message=f"Invalid confidence for {label}: {raw_value!r}"))
+        return None
+    if not math.isfinite(confidence):
+        warnings.append(MemoryWarningItem(path=str(path), message=f"Invalid confidence for {label}: {raw_value!r}"))
+        return None
+    return confidence
+
+
+def _glossary_target_and_confidence(
+    raw_target: Any,
+    default_confidence: float,
+    path: Path,
+    warnings: list[MemoryWarningItem],
+    label: str,
+) -> tuple[str, float | None]:
     if isinstance(raw_target, dict):
         target = str(raw_target.get("target") or raw_target.get("name_vi") or "").strip()
-        confidence = float(raw_target.get("confidence") or default_confidence)
+        confidence = _parse_confidence(raw_target.get("confidence"), default_confidence, path, warnings, label)
         return target, confidence
     return str(raw_target or "").strip(), default_confidence
 
