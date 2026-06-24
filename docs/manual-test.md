@@ -29,6 +29,9 @@ vietdub resume .\jobs\sample --from tts
 
 - A job folder is created under `jobs`.
 - `stt/segments.json`, `ocr/subtitles.json`, `transcript/merged.json`, and `context/style_guide.json` exist after review run.
+- `context/system_memory.json` exists after review run.
+- `context/translation_examples.json` exists after review run.
+- `context/characters.json` and `context/glossary.json` contain JSON that can be opened in a text editor.
 - `translation/review.csv` opens in Excel without mojibake.
-- `output/subtitles_vi.srt` contains the reviewed Vietnamese lines.
-- `tts/segments` contains one MP3 per reviewed non-empty row.
+- `output/subtitles_vi.srt` contains the reviewed Vietnamese lines after `vietdub resume <job> --from tts` or `vietdub run <video> --mode auto`.
+- `tts/segments` contains one MP3 per reviewed non-empty row when Edge TTS succeeds.

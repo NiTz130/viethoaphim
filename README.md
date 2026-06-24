@@ -47,3 +47,23 @@ vietdub resume .\jobs\<job-name> --from tts
 - `jobs\<job-name>\output\subtitles_vi.srt`
 - `jobs\<job-name>\tts\segments\*.mp3`
 - `jobs\<job-name>\output\preview_vi.mp4` when final audio muxing is available
+
+## System Memory
+
+Each review run scans previous job folders under `jobs/` before translation. It reuses:
+
+- `translation/review.csv`
+- `translation/translated.json`
+- `context/characters.json`
+- `context/glossary.json`
+- `context/reference_context.json`
+
+The current job is excluded from the scan. Reviewed rows in `review.csv` have the highest confidence, draft rows with `text_vi` are lower confidence, and generated `translated.json` rows are fallback examples.
+
+New jobs write these memory artifacts under `jobs/<job-name>/context/`:
+
+- `system_memory.json`: selected historical examples, characters, and glossary entries relevant to the current transcript
+- `translation_examples.json`: high-confidence Chinese-to-Vietnamese examples included in the LLM prompt
+- `characters.json`: names merged from reference data and relevant system memory
+- `glossary.json`: terms merged from reference data and relevant system memory
+- `system_memory_warnings.json`: scanner warnings when old job files are malformed
