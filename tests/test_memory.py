@@ -130,3 +130,106 @@ def test_collect_system_memory_records_json_warning_and_continues(tmp_path):
     assert len(memory.warnings) == 1
     assert "characters.json" in memory.warnings[0].path
     assert "Invalid JSON" in memory.warnings[0].message
+
+
+from vietdub.memory import (
+    MemoryCharacter,
+    MemoryGlossaryEntry,
+    SystemMemory,
+    TranslationExample,
+    select_relevant_memory,
+)
+from vietdub.models import TimedSegment
+
+
+def test_select_relevant_memory_keeps_only_current_transcript_matches():
+    memory = SystemMemory(
+        translation_examples=[
+            TranslationExample(
+                text_cn="\u4f60\u597d",
+                text_vi="Xin chao",
+                source_job="old",
+                source="translation/review.csv",
+                confidence=0.95,
+            ),
+            TranslationExample(
+                text_cn="\u5b8c\u5168\u4e0d\u76f8\u5173",
+                text_vi="Khong lien quan",
+                source_job="old",
+                source="translation/review.csv",
+                confidence=0.95,
+            ),
+        ],
+        characters=[
+            MemoryCharacter(
+                name_cn="\u5c0f\u660e",
+                name_vi="Tieu Minh",
+                source_job="old",
+                source="context/characters.json",
+                confidence=0.80,
+            ),
+            MemoryCharacter(
+                name_cn="\u5927\u738b",
+                name_vi="Dai vuong",
+                source_job="old",
+                source="context/characters.json",
+                confidence=0.80,
+            ),
+        ],
+        glossary=[
+            MemoryGlossaryEntry(
+                source_text="\u795e\u79d8",
+                target="than bi",
+                source_job="old",
+                source="context/glossary.json",
+                confidence=0.80,
+            ),
+            MemoryGlossaryEntry(
+                source_text="\u9662\u5b50",
+                target="san",
+                source_job="old",
+                source="context/glossary.json",
+                confidence=0.80,
+            ),
+        ],
+    )
+    segments = [
+        TimedSegment(
+            id="m-0001",
+            start_ms=0,
+            end_ms=1000,
+            text="\u5c0f\u660e\u8bf4\u4f60\u597d\uff0c\u771f\u795e\u79d8",
+        )
+    ]
+
+    selected = select_relevant_memory(memory, segments)
+
+    assert [item["text_cn"] for item in selected["translation_examples"]] == ["\u4f60\u597d"]
+    assert [item["name_cn"] for item in selected["characters"]] == ["\u5c0f\u660e"]
+    assert [item["source_text"] for item in selected["glossary"]] == ["\u795e\u79d8"]
+
+
+def test_select_relevant_memory_limits_output_by_confidence_then_score():
+    memory = SystemMemory(
+        translation_examples=[
+            TranslationExample(
+                text_cn="\u4f60\u597d",
+                text_vi="Xin chao",
+                source_job="old",
+                source="translation/review.csv",
+                confidence=0.70,
+            ),
+            TranslationExample(
+                text_cn="\u5c0f\u660e\u4f60\u597d",
+                text_vi="Tieu Minh xin chao",
+                source_job="old",
+                source="translation/review.csv",
+                confidence=0.95,
+            ),
+        ]
+    )
+    segments = [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="\u5c0f\u660e\u4f60\u597d")]
+
+    selected = select_relevant_memory(memory, segments, max_examples=1)
+
+    assert [item["text_cn"] for item in selected["translation_examples"]] == ["\u5c0f\u660e\u4f60\u597d"]

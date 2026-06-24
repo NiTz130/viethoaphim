@@ -290,3 +290,57 @@ def _put_glossary(glossary: dict[str, MemoryGlossaryEntry], candidate: MemoryGlo
     current = glossary.get(candidate.source_text)
     if current is None or candidate.confidence > current.confidence:
         glossary[candidate.source_text] = candidate
+
+
+def select_relevant_memory(
+    memory: SystemMemory,
+    segments: list,
+    max_examples: int = 40,
+    max_characters: int = 80,
+    max_glossary: int = 120,
+) -> dict[str, list[dict[str, Any]]]:
+    transcript = "\n".join(str(segment.text) for segment in segments)
+    examples = _rank_translation_examples(memory.translation_examples, transcript)[:max_examples]
+    characters = _rank_memory_items(memory.characters, transcript, "name_cn")[:max_characters]
+    glossary = _rank_memory_items(memory.glossary, transcript, "source_text")[:max_glossary]
+    return {
+        "translation_examples": [item.model_dump() for item in examples],
+        "characters": [item.model_dump() for item in characters],
+        "glossary": [item.model_dump() for item in glossary],
+    }
+
+
+def _rank_translation_examples(examples: list[TranslationExample], transcript: str) -> list[TranslationExample]:
+    scored: list[tuple[float, float, TranslationExample]] = []
+    for example in examples:
+        score = _relevance_score(example.text_cn, transcript)
+        if score <= 0:
+            continue
+        scored.append((example.confidence, score, example))
+    scored.sort(key=lambda item: (item[0], item[1], len(item[2].text_cn)), reverse=True)
+    return [item[2] for item in scored]
+
+
+def _rank_memory_items(items: list[Any], transcript: str, source_attr: str) -> list[Any]:
+    scored: list[tuple[float, float, int, Any]] = []
+    for item in items:
+        source_text = str(getattr(item, source_attr))
+        score = _relevance_score(source_text, transcript)
+        if score <= 0:
+            continue
+        scored.append((float(item.confidence), score, len(source_text), item))
+    scored.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return [item[3] for item in scored]
+
+
+def _relevance_score(source_text: str, transcript: str) -> float:
+    if not source_text or not transcript:
+        return 0.0
+    if source_text in transcript:
+        return 1.0
+    source_chars = {char for char in source_text if not char.isspace()}
+    if not source_chars:
+        return 0.0
+    transcript_chars = {char for char in transcript if not char.isspace()}
+    overlap = len(source_chars & transcript_chars) / len(source_chars)
+    return overlap if overlap >= 0.50 else 0.0
