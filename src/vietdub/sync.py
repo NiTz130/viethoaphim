@@ -99,6 +99,12 @@ def _fit_audio_to_duration(segment: AudioSegment, target_ms: int, sample_rate: i
     return normalized, original_duration_ms, factor
 
 
+def _segment_audio_path(segment_dir: Path, segment_id: str) -> Path | None:
+    if not segment_id or "/" in segment_id or "\\" in segment_id or ":" in segment_id:
+        return None
+    return segment_dir / f"{segment_id}.mp3"
+
+
 def _write_sync_report(report: SyncReport, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report.model_dump(mode="json"), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -124,9 +130,11 @@ def assemble_final_audio(
         original_duration_ms = 0
         synced_duration_ms = 0
         speed_factor = 1.0
-        segment_path = segment_dir / f"{row.segment_id}.mp3"
+        segment_path = _segment_audio_path(segment_dir, row.segment_id)
 
-        if target_ms <= 0:
+        if segment_path is None:
+            warnings.append(f"invalid segment_id for TTS audio: {row.segment_id!r}")
+        elif target_ms <= 0:
             warnings.append(f"invalid subtitle duration: start_ms={row.start_ms} end_ms={row.end_ms}")
         elif not segment_path.exists():
             warnings.append(f"missing TTS audio: {segment_path}")
