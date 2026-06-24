@@ -164,11 +164,29 @@ def _validate_resume_segment_ids(job: Job, rows: list[TranslationRow]) -> None:
             raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r}")
 
 
+def _probe_video_duration_ms(job: Job) -> int | None:
+    from .media import probe_media
+
+    try:
+        metadata = probe_media(job.input_video)
+    except RuntimeError:
+        return None
+    duration = metadata.get("format", {}).get("duration")
+    try:
+        duration_seconds = float(duration)
+    except (TypeError, ValueError):
+        return None
+    if duration_seconds <= 0:
+        return None
+    return int(duration_seconds * 1000)
+
+
 def resume_tts_and_render(job: Job, settings) -> Path:
     import asyncio
 
     from .media import mux_preview
     from .srt import render_srt
+    from .sync import assemble_final_audio
     from .translate import import_review_csv
     from .tts import EdgeTtsEngine
 
@@ -211,9 +229,34 @@ def resume_tts_and_render(job: Job, settings) -> Path:
 
     warning_count = asyncio.run(synthesize_all())
     job.mark_done(StepName.TTS, {"segments": len(vietnamese_segments), "warnings": warning_count})
+
     final_audio = job.root / "tts" / "final_vi.wav"
-    final_audio.write_bytes(b"")
+    sync_report_path = job.root / "tts" / "sync_report.json"
+    sync_report = assemble_final_audio(
+        rows=rows,
+        segment_dir=job.root / "tts" / "segments",
+        output_audio=final_audio,
+        sample_rate=settings.sample_rate,
+        video_duration_ms=_probe_video_duration_ms(job),
+        sync_report_path=sync_report_path,
+    )
+    if not final_audio.exists() or final_audio.stat().st_size == 0:
+        raise RuntimeError(f"Final audio was not created: {final_audio}")
+
     preview = job.root / "output" / "preview_vi.mp4"
-    if final_audio.stat().st_size > 0:
-        mux_preview(job.input_video, final_audio, srt_path, preview)
+    mux_preview(job.input_video, final_audio, srt_path, preview)
+    synced_segments = sum(1 for segment in sync_report.segments if segment.synced_duration_ms > 0)
+    skipped_segments = sum(1 for segment in sync_report.segments if segment.synced_duration_ms == 0)
+    job.mark_done(
+        StepName.RENDER,
+        {
+            "subtitles": str(srt_path),
+            "segments": len(vietnamese_segments),
+            "final_audio": str(final_audio),
+            "sync_report": str(sync_report_path),
+            "preview": str(preview),
+            "synced_segments": synced_segments,
+            "skipped_segments": skipped_segments,
+        },
+    )
     return srt_path

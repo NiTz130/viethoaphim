@@ -1,9 +1,36 @@
 import json
 
+from pydub.generators import Sine
+
 from vietdub.models import TimedSegment
 from vietdub.jobs import Job
 from vietdub.pipeline import resume_tts_and_render, run_fixture_pipeline
 from vietdub.srt import render_srt
+
+
+def _resume_settings():
+    return type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural", "sample_rate": 44_100})()
+
+
+def _write_valid_mp3(path, duration_ms: int = 400) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Sine(440).to_audio_segment(duration=duration_ms).export(path, format="mp3")
+
+
+def _patch_resume_media(monkeypatch):
+    calls = []
+
+    def fake_probe_media(video_path):
+        return {"format": {"duration": "1.000"}, "streams": []}
+
+    def fake_mux_preview(video, audio, subtitles, output):
+        calls.append({"video": video, "audio": audio, "subtitles": subtitles, "output": output})
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"preview")
+
+    monkeypatch.setattr("vietdub.media.probe_media", fake_probe_media)
+    monkeypatch.setattr("vietdub.media.mux_preview", fake_mux_preview)
+    return calls
 
 
 def test_fixture_pipeline_stops_after_review_csv(tmp_path):
@@ -60,19 +87,30 @@ def test_resume_tts_and_render_writes_output_srt(monkeypatch, tmp_path):
     )
     (tmp_path / "job" / "input.mp4").write_bytes(b"fake")
     job = Job(root=tmp_path / "job", config={})
+    mux_calls = _patch_resume_media(monkeypatch)
 
     async def fake_synthesize_segment(self, row, output):
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"mp3")
+        _write_valid_mp3(output, duration_ms=400)
         return output
 
     monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
 
-    srt_path = resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+    srt_path = resume_tts_and_render(job, _resume_settings())
 
+    final_audio = tmp_path / "job" / "tts" / "final_vi.wav"
+    sync_report_path = tmp_path / "job" / "tts" / "sync_report.json"
+    preview_path = tmp_path / "job" / "output" / "preview_vi.mp4"
     assert srt_path == tmp_path / "job" / "output" / "subtitles_vi.srt"
     assert "Xin ch\u00e0o" in srt_path.read_text(encoding="utf-8")
     assert (tmp_path / "job" / "tts" / "segments" / "m-0001.mp3").exists()
+    assert final_audio.stat().st_size > 0
+    assert preview_path.read_bytes() == b"preview"
+    assert mux_calls == [{"video": job.input_video, "audio": final_audio, "subtitles": srt_path, "output": preview_path}]
+    sync_report = json.loads(sync_report_path.read_text(encoding="utf-8"))
+    assert sync_report["segments"][0]["segment_id"] == "m-0001"
+    status = json.loads((tmp_path / "job" / "status.json").read_text(encoding="utf-8"))
+    assert status["render"]["details"]["final_audio"] == str(final_audio)
+    assert status["render"]["details"]["preview"] == str(preview_path)
 
 
 def test_resume_tts_and_render_keeps_srt_when_tts_segment_fails(monkeypatch, tmp_path):
@@ -85,17 +123,26 @@ def test_resume_tts_and_render_keeps_srt_when_tts_segment_fails(monkeypatch, tmp
     )
     (tmp_path / "job" / "input.mp4").write_bytes(b"fake")
     job = Job(root=tmp_path / "job", config={})
+    _patch_resume_media(monkeypatch)
 
     async def fail_synthesize_segment(self, row, output):
         raise RuntimeError("tts failed")
 
     monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
 
-    srt_path = resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+    try:
+        resume_tts_and_render(job, _resume_settings())
+    except RuntimeError as exc:
+        assert "No valid TTS segment audio" in str(exc)
+    else:
+        raise AssertionError("expected final audio assembly failure")
 
+    srt_path = tmp_path / "job" / "output" / "subtitles_vi.srt"
     assert "Xin ch\u00e0o" in srt_path.read_text(encoding="utf-8")
     report = (tmp_path / "job" / "tts" / "tts_warnings.json").read_text(encoding="utf-8")
     assert "m-0001" in report
+    sync_report = json.loads((tmp_path / "job" / "tts" / "sync_report.json").read_text(encoding="utf-8"))
+    assert "missing TTS audio" in sync_report["segments"][0]["warnings"][0]
 
 
 def test_resume_tts_rejects_path_traversal_segment_id(monkeypatch, tmp_path):
@@ -239,18 +286,19 @@ def test_resume_tts_clears_stale_warning_count_after_success(monkeypatch, tmp_pa
     warning_path.write_text(json.dumps([{"segment_id": "old", "error": "old failure"}]), encoding="utf-8")
     (job_root / "input.mp4").write_bytes(b"fake")
     job = Job(root=job_root, config={})
+    _patch_resume_media(monkeypatch)
 
     async def fake_synthesize_segment(self, row, output):
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"mp3")
+        _write_valid_mp3(output, duration_ms=400)
         return output
 
     monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
 
-    resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+    resume_tts_and_render(job, _resume_settings())
 
     status = json.loads((job_root / "status.json").read_text(encoding="utf-8"))
     assert status["tts"]["details"]["warnings"] == 0
+    assert status["render"]["details"]["preview"] == str(job_root / "output" / "preview_vi.mp4")
     assert not warning_path.exists()
 
 
