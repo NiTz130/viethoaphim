@@ -1,5 +1,12 @@
+import pytest
+
 from vietdub.models import TimedSegment, TranslationRow
-from vietdub.translate import build_translation_prompt, export_review_csv, import_review_csv
+from vietdub.translate import (
+    build_translation_prompt,
+    export_review_csv,
+    import_review_csv,
+    parse_translation_response,
+)
 
 
 def test_review_csv_round_trip(tmp_path):
@@ -31,3 +38,38 @@ def test_translation_prompt_explicitly_requests_json_output():
 
     assert "Return JSON only" in prompt
     assert "translations" in prompt
+
+
+def test_parse_translation_response_rejects_invalid_json():
+    with pytest.raises(RuntimeError, match="Invalid LLM translation response"):
+        parse_translation_response("{bad json")
+
+
+def test_parse_translation_response_requires_translations_list():
+    with pytest.raises(RuntimeError, match="translations"):
+        parse_translation_response('{"items": []}')
+
+
+def test_parse_translation_response_identifies_bad_item():
+    with pytest.raises(RuntimeError, match="translation item 1"):
+        parse_translation_response('{"translations": ["not an object"]}')
+
+
+def test_import_review_csv_rejects_missing_columns(tmp_path):
+    path = tmp_path / "review.csv"
+    path.write_text("segment_id,start_ms,end_ms,text_cn,text_vi\nm-0001,0,1000,\u4f60\u597d,Xin chao\n", encoding="utf-8-sig")
+
+    with pytest.raises(RuntimeError, match="missing columns"):
+        import_review_csv(path)
+
+
+def test_import_review_csv_reports_invalid_row_number(tmp_path):
+    path = tmp_path / "review.csv"
+    path.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-0001,1000,0,,\u4f60\u597d,Xin chao,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+
+    with pytest.raises(RuntimeError, match="row 2"):
+        import_review_csv(path)

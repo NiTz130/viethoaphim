@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import csv
 import json
+from json import JSONDecodeError
 from pathlib import Path
+
+from pydantic import ValidationError
 
 from .models import TimedSegment, TranslationRow
 
@@ -19,6 +22,32 @@ CSV_FIELDS = [
 ]
 
 ALLOWED_REVIEW_STATUSES = {"draft", "reviewed", "skip"}
+
+
+def parse_translation_response(content: str) -> list[TranslationRow]:
+    try:
+        data = json.loads(content)
+    except JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid LLM translation response: invalid JSON at char {exc.pos}") from exc
+
+    if not isinstance(data, dict):
+        raise RuntimeError("Invalid LLM translation response: expected a JSON object")
+
+    translations = data.get("translations")
+    if not isinstance(translations, list):
+        raise RuntimeError("Invalid LLM translation response: expected 'translations' to be a list")
+
+    rows: list[TranslationRow] = []
+    for index, item in enumerate(translations, start=1):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"Invalid LLM translation response: translation item {index} is not an object")
+        if item.get("status") not in ALLOWED_REVIEW_STATUSES:
+            item = {**item, "status": "draft"}
+        try:
+            rows.append(TranslationRow.model_validate(item))
+        except ValidationError as exc:
+            raise RuntimeError(f"Invalid LLM translation response: translation item {index} failed validation") from exc
+    return rows
 
 
 def build_translation_prompt(segments: list[TimedSegment], context_bundle: dict) -> str:
@@ -83,13 +112,7 @@ def translate_with_llm(
         raise RuntimeError(f"OpenAI request failed with HTTP {exc.status_code}") from exc
     except OpenAIError as exc:
         raise RuntimeError(f"OpenAI request failed: {exc.__class__.__name__}") from exc
-    data = json.loads(content)
-    rows: list[TranslationRow] = []
-    for item in data["translations"]:
-        if item.get("status") not in ALLOWED_REVIEW_STATUSES:
-            item["status"] = "draft"
-        rows.append(TranslationRow.model_validate(item))
-    return rows
+    return parse_translation_response(content)
 
 
 def export_review_csv(path: Path, segments: list[TimedSegment], translations: list[TranslationRow]) -> None:
@@ -116,4 +139,18 @@ def export_review_csv(path: Path, segments: list[TimedSegment], translations: li
 def import_review_csv(path: Path) -> list[TranslationRow]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
-        return [TranslationRow.model_validate(row) for row in reader]
+        fieldnames = reader.fieldnames or []
+        missing = [field for field in CSV_FIELDS if field not in fieldnames]
+        if missing:
+            raise RuntimeError(f"Invalid review CSV {path}: missing columns: {', '.join(missing)}")
+
+        rows: list[TranslationRow] = []
+        for row_number, row in enumerate(reader, start=2):
+            try:
+                translation = TranslationRow.model_validate(row)
+                if translation.end_ms <= translation.start_ms:
+                    raise ValueError("end_ms must be greater than start_ms")
+                rows.append(translation)
+            except (ValidationError, ValueError) as exc:
+                raise RuntimeError(f"Invalid review CSV {path}: row {row_number} failed validation") from exc
+        return rows
