@@ -18,8 +18,11 @@ def safe_echo(message: object) -> None:
 
 
 def _open_job(job_dir: Path, jobs_dir: Path) -> Job:
+    candidate = job_dir
+    if not candidate.exists() and not candidate.is_absolute():
+        candidate = jobs_dir / job_dir
     try:
-        return JobManager(jobs_dir).open(job_dir)
+        return JobManager(jobs_dir).open(candidate)
     except FileNotFoundError as exc:
         raise typer.BadParameter(str(exc)) from exc
 

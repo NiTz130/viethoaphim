@@ -83,22 +83,17 @@ def test_resume_runtime_error_is_click_error(monkeypatch, tmp_path):
     assert "Traceback" not in result.output
 
 
-def test_inspect_uses_configured_jobs_dir(monkeypatch, tmp_path):
-    from vietdub import cli
-    from vietdub.jobs import Job
+def test_inspect_opens_bare_job_name_from_configured_jobs_dir(monkeypatch, tmp_path):
+    jobs_dir = tmp_path / "configured-jobs"
+    job_root = jobs_dir / "clip"
+    job_root.mkdir(parents=True)
+    (job_root / "job.json").write_text('{"series": null}', encoding="utf-8")
+    (job_root / "status.json").write_text('{"extract": {"state": "done"}}', encoding="utf-8")
 
-    captured = {}
-    configured_jobs_dir = tmp_path / "configured-jobs"
-
-    def fake_open_job(job_dir, jobs_dir):
-        captured["job_dir"] = job_dir
-        captured["jobs_dir"] = jobs_dir
-        return Job(root=job_dir, config={})
-
-    monkeypatch.setenv("JOBS_DIR", str(configured_jobs_dir))
-    monkeypatch.setattr(cli, "_open_job", fake_open_job)
+    monkeypatch.setenv("JOBS_DIR", str(jobs_dir))
 
     result = runner.invoke(app, ["inspect", "clip"])
 
     assert result.exit_code == 0
-    assert captured["jobs_dir"] == configured_jobs_dir
+    assert str(job_root) in result.output
+    assert "extract" in result.output
