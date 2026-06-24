@@ -59,8 +59,17 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     job.mark_done(StepName.EXTRACT, {"audio": str(audio_path)})
 
     stt_segments = FasterWhisperSttEngine(typed_settings.stt_model, typed_settings.stt_language).transcribe(audio_path)
+    write_segments(job, "stt/segments.json", stt_segments)
+    job.mark_done(StepName.STT, {"segments": len(stt_segments), "path": str(job.root / "stt" / "segments.json")})
+
     ocr_segments = PaddleSubtitleOcrEngine().recognize(job.input_video)
+    write_segments(job, "ocr/subtitles.json", ocr_segments)
+    job.mark_done(StepName.OCR, {"segments": len(ocr_segments), "path": str(job.root / "ocr" / "subtitles.json")})
+
     merged = merge_segments(stt_segments, ocr_segments)
+    write_segments(job, "transcript/merged.json", merged)
+    job.mark_done(StepName.MERGE, {"segments": len(merged), "path": str(job.root / "transcript" / "merged.json")})
+
     reference_context = build_reference_context(merged, Path(typed_settings.reference_data_dir))
     raw_system_memory = collect_system_memory(jobs_dir, current_job=job.root)
     selected_system_memory = select_relevant_memory(raw_system_memory, merged)
@@ -70,6 +79,18 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
         reference_context=reference_context,
         system_memory=selected_system_memory,
     )
+    for name, value in context_bundle.items():
+        job.write_json(f"context/{name}.json", value)
+    if raw_system_memory.warnings:
+        job.write_json("context/system_memory_warnings.json", [warning.model_dump() for warning in raw_system_memory.warnings])
+    job.mark_done(
+        StepName.CONTEXT,
+        {
+            "context_files": len(context_bundle),
+            "warnings": len(raw_system_memory.warnings),
+        },
+    )
+
     translations = translate_with_llm(
         merged,
         context_bundle,
@@ -77,16 +98,15 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
         typed_settings.llm_model,
         typed_settings.openai_base_url,
     )
-
-    write_segments(job, "stt/segments.json", stt_segments)
-    write_segments(job, "ocr/subtitles.json", ocr_segments)
-    write_segments(job, "transcript/merged.json", merged)
-    for name, value in context_bundle.items():
-        job.write_json(f"context/{name}.json", value)
-    if raw_system_memory.warnings:
-        job.write_json("context/system_memory_warnings.json", [warning.model_dump() for warning in raw_system_memory.warnings])
     job.write_json("translation/translated.json", [row.model_dump() for row in translations])
     export_review_csv(job.root / "translation" / "review.csv", merged, translations)
+    job.mark_done(
+        StepName.TRANSLATE,
+        {
+            "rows": len(translations),
+            "review_csv": str(job.root / "translation" / "review.csv"),
+        },
+    )
     return job
 
 

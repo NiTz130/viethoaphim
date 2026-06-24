@@ -209,3 +209,69 @@ def test_review_pipeline_writes_selected_system_memory(monkeypatch, tmp_path):
     assert (job.root / "context" / "translation_examples.json").exists()
     warnings = json.loads((job.root / "context" / "system_memory_warnings.json").read_text(encoding="utf-8"))
     assert warnings == [{"path": "old/context/characters.json", "message": "Invalid JSON: test"}]
+
+
+def test_review_pipeline_persists_artifacts_before_translate_failure(monkeypatch, tmp_path):
+    from vietdub.pipeline import run_review_pipeline
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake-video")
+
+    def fake_extract_audio(video_path, audio_path, sample_rate):
+        audio_path.parent.mkdir(parents=True, exist_ok=True)
+        audio_path.write_bytes(b"wav")
+
+    class FakeSttEngine:
+        def __init__(self, model, language):
+            self.model = model
+            self.language = language
+
+        def transcribe(self, audio_path):
+            return [TimedSegment(id="s-0001", start_ms=0, end_ms=1000, text="\u4f60\u597d", source="stt")]
+
+    class FakeOcrEngine:
+        def recognize(self, video_path):
+            return [TimedSegment(id="o-0001", start_ms=0, end_ms=1000, text="\u4f60\u597d", source="ocr")]
+
+    def fail_translate(segments, context_bundle, api_key, model, base_url):
+        raise RuntimeError("translation failed")
+
+    monkeypatch.setattr("vietdub.media.extract_audio", fake_extract_audio)
+    monkeypatch.setattr("vietdub.stt.FasterWhisperSttEngine", FakeSttEngine)
+    monkeypatch.setattr("vietdub.ocr.PaddleSubtitleOcrEngine", FakeOcrEngine)
+    monkeypatch.setattr("vietdub.reference.build_reference_context", lambda segments, data_dir: {})
+    monkeypatch.setattr("vietdub.translate.translate_with_llm", fail_translate)
+
+    settings = type(
+        "Settings",
+        (),
+        {
+            "sample_rate": 44100,
+            "stt_model": "tiny",
+            "stt_language": "zh",
+            "reference_data_dir": str(tmp_path / "data"),
+            "openai_api_key": "key",
+            "llm_model": "model",
+            "openai_base_url": "",
+        },
+    )()
+
+    try:
+        run_review_pipeline(video=video, jobs_dir=tmp_path / "jobs", series=None, settings=settings)
+    except RuntimeError as exc:
+        assert "translation failed" in str(exc)
+    else:
+        raise AssertionError("expected translation failure")
+
+    job_root = tmp_path / "jobs" / "clip"
+    assert (job_root / "stt" / "segments.json").exists()
+    assert (job_root / "ocr" / "subtitles.json").exists()
+    assert (job_root / "transcript" / "merged.json").exists()
+    assert (job_root / "context" / "style_guide.json").exists()
+    status = json.loads((job_root / "status.json").read_text(encoding="utf-8"))
+    assert status["extract"]["state"] == "done"
+    assert status["stt"]["state"] == "done"
+    assert status["ocr"]["state"] == "done"
+    assert status["merge"]["state"] == "done"
+    assert status["context"]["state"] == "done"
+    assert "translate" not in status
