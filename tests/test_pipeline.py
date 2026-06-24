@@ -98,6 +98,60 @@ def test_resume_tts_and_render_keeps_srt_when_tts_segment_fails(monkeypatch, tmp
     assert "m-0001" in report
 
 
+def test_resume_tts_rejects_path_traversal_segment_id(monkeypatch, tmp_path):
+    review = tmp_path / "job" / "translation" / "review.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "..\\evil,0,1000,,\u4f60\u597d,Xin chao,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    (tmp_path / "job" / "input.mp4").write_bytes(b"fake")
+    job = Job(root=tmp_path / "job", config={})
+
+    async def fake_synthesize_segment(self, row, output):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"mp3")
+        return output
+
+    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
+
+    try:
+        resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+    except RuntimeError as exc:
+        assert "Invalid segment_id" in str(exc)
+    else:
+        raise AssertionError("expected invalid segment_id failure")
+
+    assert not (tmp_path / "job" / "evil.mp3").exists()
+    assert not (tmp_path / "evil.mp3").exists()
+
+
+def test_resume_tts_rejects_unknown_transcript_segment_id(tmp_path):
+    job_root = tmp_path / "job"
+    review = job_root / "translation" / "review.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-9999,0,1000,,\u4f60\u597d,Xin chao,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    (job_root / "transcript").mkdir()
+    (job_root / "transcript" / "merged.json").write_text(
+        json.dumps([{"id": "m-0001", "start_ms": 0, "end_ms": 1000, "text": "\u4f60\u597d", "source": "ocr"}]),
+        encoding="utf-8",
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    job = Job(root=job_root, config={})
+
+    try:
+        resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+    except RuntimeError as exc:
+        assert "m-9999" in str(exc)
+    else:
+        raise AssertionError("expected unknown segment_id failure")
+
+
 def test_review_pipeline_writes_selected_system_memory(monkeypatch, tmp_path):
     from vietdub.memory import MemoryWarningItem, SystemMemory, TranslationExample
     from vietdub.pipeline import run_review_pipeline

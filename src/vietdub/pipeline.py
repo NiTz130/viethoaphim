@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from .context import build_context_bundle
@@ -10,6 +11,9 @@ from .models import StepName, TimedSegment, TranslationRow
 from .ocr import FixtureOcrEngine
 from .stt import FixtureSttEngine
 from .translate import export_review_csv
+
+
+SAFE_SEGMENT_ID_RE = re.compile(r"^m-\d+$")
 
 
 def write_segments(job: Job, relative: str, segments: list[TimedSegment]) -> None:
@@ -110,6 +114,48 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     return job
 
 
+def _load_allowed_segment_ids(job: Job) -> set[str] | None:
+    merged_path = job.root / "transcript" / "merged.json"
+    if not merged_path.exists():
+        return None
+    try:
+        data = json.loads(merged_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid transcript file {merged_path}: invalid JSON") from exc
+    if not isinstance(data, list):
+        raise RuntimeError(f"Invalid transcript file {merged_path}: expected a JSON list")
+
+    allowed: set[str] = set()
+    for index, item in enumerate(data, start=1):
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            raise RuntimeError(f"Invalid transcript file {merged_path}: item {index} is missing string id")
+        allowed.add(item["id"])
+    return allowed
+
+
+def _is_safe_fallback_segment_id(segment_id: str) -> bool:
+    if not segment_id:
+        return False
+    if "/" in segment_id or "\\" in segment_id or ":" in segment_id:
+        return False
+    return SAFE_SEGMENT_ID_RE.fullmatch(segment_id) is not None
+
+
+def _validate_resume_segment_ids(job: Job, rows: list[TranslationRow]) -> None:
+    allowed_ids = _load_allowed_segment_ids(job)
+    review_path = job.root / "translation" / "review.csv"
+    for row in rows:
+        if row.status == "skip" or not row.text_vi.strip():
+            continue
+        segment_id = row.segment_id
+        if allowed_ids is not None:
+            if segment_id not in allowed_ids:
+                raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r} is not in transcript/merged.json")
+            continue
+        if not _is_safe_fallback_segment_id(segment_id):
+            raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r}")
+
+
 def resume_tts_and_render(job: Job, settings) -> Path:
     import asyncio
 
@@ -119,6 +165,7 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     from .tts import EdgeTtsEngine
 
     rows = import_review_csv(job.root / "translation" / "review.csv")
+    _validate_resume_segment_ids(job, rows)
     vietnamese_segments = [
         TimedSegment(
             id=row.segment_id,
@@ -134,6 +181,7 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     srt_path = job.root / "output" / "subtitles_vi.srt"
     srt_path.parent.mkdir(parents=True, exist_ok=True)
     srt_path.write_text(render_srt(vietnamese_segments), encoding="utf-8")
+    job.mark_done(StepName.RENDER, {"subtitles": str(srt_path), "segments": len(vietnamese_segments)})
 
     async def synthesize_all() -> None:
         engine = EdgeTtsEngine(settings.edge_voice)
@@ -151,6 +199,14 @@ def resume_tts_and_render(job: Job, settings) -> Path:
             warning_path.write_text(json.dumps(warnings, ensure_ascii=False, indent=2), encoding="utf-8")
 
     asyncio.run(synthesize_all())
+    warnings_path = job.root / "tts" / "tts_warnings.json"
+    warning_count = 0
+    if warnings_path.exists():
+        try:
+            warning_count = len(json.loads(warnings_path.read_text(encoding="utf-8")))
+        except json.JSONDecodeError:
+            warning_count = 1
+    job.mark_done(StepName.TTS, {"segments": len(vietnamese_segments), "warnings": warning_count})
     final_audio = job.root / "tts" / "final_vi.wav"
     final_audio.write_bytes(b"")
     preview = job.root / "output" / "preview_vi.mp4"
