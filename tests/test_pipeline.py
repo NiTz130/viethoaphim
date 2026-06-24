@@ -299,6 +299,43 @@ def test_resume_tts_rejects_path_traversal_segment_id(monkeypatch, tmp_path):
     assert not (tmp_path / "evil.mp3").exists()
 
 
+def test_resume_tts_clears_stale_render_state_before_segment_validation(tmp_path):
+    job_root = tmp_path / "job"
+    review = job_root / "translation" / "review.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "..\\evil,0,1000,,\u4f60\u597d,Xin chao,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    final_audio = job_root / "tts" / "final_vi.wav"
+    final_audio.parent.mkdir(parents=True)
+    final_audio.write_bytes(b"old-final-audio")
+    preview = job_root / "output" / "preview_vi.mp4"
+    preview.parent.mkdir(parents=True)
+    preview.write_bytes(b"old-preview")
+    job = Job(root=job_root, config={})
+    job.write_json(
+        "status.json",
+        {
+            "render": {
+                "state": "done",
+                "details": {"final_audio": str(final_audio), "preview": str(preview)},
+            }
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="Invalid segment_id"):
+        resume_tts_and_render(job, _resume_settings())
+
+    status = json.loads((job_root / "status.json").read_text(encoding="utf-8"))
+    assert "render" not in status
+    assert not final_audio.exists()
+    assert not preview.exists()
+    assert not (job_root / "output" / "subtitles_vi.srt").exists()
+
+
 def test_resume_tts_rejects_unknown_transcript_segment_id(tmp_path):
     job_root = tmp_path / "job"
     review = job_root / "translation" / "review.csv"

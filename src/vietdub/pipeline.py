@@ -194,6 +194,15 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     from .translate import import_review_csv
     from .tts import EdgeTtsEngine
 
+    final_audio = job.root / "tts" / "final_vi.wav"
+    preview = job.root / "output" / "preview_vi.mp4"
+    status = job.load_status()
+    if StepName.RENDER.value in status:
+        del status[StepName.RENDER.value]
+        job.write_json("status.json", status)
+    final_audio.unlink(missing_ok=True)
+    preview.unlink(missing_ok=True)
+
     rows = import_review_csv(job.root / "translation" / "review.csv")
     _validate_resume_segment_ids(job, rows)
     vietnamese_segments = [
@@ -211,16 +220,6 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     srt_path = job.root / "output" / "subtitles_vi.srt"
     srt_path.parent.mkdir(parents=True, exist_ok=True)
     srt_path.write_text(render_srt(vietnamese_segments), encoding="utf-8")
-
-    status = job.load_status()
-    if StepName.RENDER.value in status:
-        del status[StepName.RENDER.value]
-        job.write_json("status.json", status)
-
-    final_audio = job.root / "tts" / "final_vi.wav"
-    preview = job.root / "output" / "preview_vi.mp4"
-    final_audio.unlink(missing_ok=True)
-    preview.unlink(missing_ok=True)
 
     async def synthesize_all() -> int:
         engine = EdgeTtsEngine(settings.edge_voice)
