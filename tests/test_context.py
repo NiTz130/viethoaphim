@@ -19,3 +19,19 @@ def test_context_bundle_contains_episode_and_style():
     assert "style_guide" in bundle
     assert bundle["style_guide"]["tone"] == DEFAULT_TONE
     assert bundle["scene_context"][0]["segment_ids"] == ["m-0001", "m-0002"]
+
+
+def test_context_bundle_includes_reference_context():
+    reference_context = {
+        "Pronouns.txt": [{"source": "\u4f60", "target": "ng\u01b0\u01a1i"}],
+        "VietPhrase.txt": [{"source": "\u795e\u79d8", "target": "th\u1ea7n b\u00ed"}],
+    }
+
+    bundle = build_context_bundle(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="\u4f60\u6709\u795e\u79d8\u8fc7\u53bb")],
+        series_context={},
+        reference_context=reference_context,
+    )
+
+    assert bundle["reference_context"] == reference_context
+    assert "Use reference_context" in bundle["style_guide"]["translation_rules"][-1]

@@ -29,3 +29,4 @@ def test_settings_defaults_without_api_key(monkeypatch):
     assert settings.openai_base_url == ""
     assert settings.llm_model == ""
     assert settings.edge_voice == "vi-VN-HoaiMyNeural"
+    assert settings.reference_data_dir == "data"

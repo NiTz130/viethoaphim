@@ -13,11 +13,16 @@ SCENE_SUMMARY = (
 )
 
 
-def build_context_bundle(segments: list[TimedSegment], series_context: dict) -> dict:
+def build_context_bundle(
+    segments: list[TimedSegment],
+    series_context: dict,
+    reference_context: dict | None = None,
+) -> dict:
     joined = " ".join(segment.text for segment in segments[:20])
     scene_ids = [segment.id for segment in segments[:20]]
     return {
         "series_context": series_context,
+        "reference_context": reference_context or {},
         "episode_context": {
             "summary": EPISODE_SUMMARY,
             "source_excerpt": joined,
@@ -30,6 +35,7 @@ def build_context_bundle(segments: list[TimedSegment], series_context: dict) -> 
                 "\u01afu ti\u00ean c\u00e2u tho\u1ea1i t\u1ef1 nhi\u00ean h\u01a1n d\u1ecbch s\u00e1t ch\u1eef.",
                 "Gi\u1eef punchline ng\u1eafn \u0111\u1ec3 h\u1ee3p timing TTS.",
                 "D\u1ecbch nh\u1ea5t qu\u00e1n t\u00ean ri\u00eang v\u00e0 c\u00e1ch x\u01b0ng h\u00f4 trong to\u00e0n b\u1ed9 job.",
+                "Use reference_context for names, pronouns, and phrase hints, but keep Vietnamese dialogue natural.",
             ],
         },
         "scene_context": [

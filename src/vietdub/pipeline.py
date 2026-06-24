@@ -46,6 +46,7 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     from .config import Settings
     from .media import extract_audio
     from .ocr import PaddleSubtitleOcrEngine
+    from .reference import build_reference_context
     from .stt import FasterWhisperSttEngine
     from .translate import translate_with_llm
 
@@ -58,7 +59,8 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     stt_segments = FasterWhisperSttEngine(typed_settings.stt_model, typed_settings.stt_language).transcribe(audio_path)
     ocr_segments = PaddleSubtitleOcrEngine().recognize(job.input_video)
     merged = merge_segments(stt_segments, ocr_segments)
-    context_bundle = build_context_bundle(merged, series_context={})
+    reference_context = build_reference_context(merged, Path(typed_settings.reference_data_dir))
+    context_bundle = build_context_bundle(merged, series_context={}, reference_context=reference_context)
     translations = translate_with_llm(
         merged,
         context_bundle,

@@ -11,4 +11,5 @@ class Settings(BaseSettings):
     stt_model: str = "medium"
     stt_language: str = "zh"
     jobs_dir: str = "jobs"
+    reference_data_dir: str = "data"
     sample_rate: int = 44_100
