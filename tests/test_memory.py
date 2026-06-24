@@ -1,0 +1,132 @@
+import json
+
+from vietdub.memory import collect_system_memory
+
+
+def test_collect_system_memory_reads_all_supported_sources(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    job = jobs_dir / "old-job"
+    (job / "translation").mkdir(parents=True)
+    (job / "context").mkdir()
+    (job / "translation" / "review.csv").write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-0001,0,1000,,\u4f60\u597d,Xin chao da sua,,reviewed\n"
+        "m-0002,1000,2000,,\u795e\u79d8,Bi an nhap,,draft\n"
+        "m-0003,2000,3000,,\u8df3\u8fc7,Bo qua,,skip\n",
+        encoding="utf-8-sig",
+    )
+    (job / "translation" / "translated.json").write_text(
+        json.dumps(
+            [
+                {
+                    "segment_id": "m-0004",
+                    "start_ms": 3000,
+                    "end_ms": 4000,
+                    "speaker": None,
+                    "text_cn": "\u5927\u738b",
+                    "text_vi": "Dai vuong",
+                    "context_note": "",
+                    "status": "draft",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (job / "context" / "characters.json").write_text(
+        json.dumps([{"name_cn": "\u5c0f\u660e", "name_vi": "Tieu Minh", "source": "manual"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (job / "context" / "glossary.json").write_text(
+        json.dumps({"\u795e\u79d8": "than bi"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (job / "context" / "reference_context.json").write_text(
+        json.dumps(
+            {
+                "Names.txt": [{"source": "\u5982\u6765\u4f5b", "target": "Phat Nhu Lai"}],
+                "VietPhrase.txt": [{"source": "\u9662\u5b50", "target": "san"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    memory = collect_system_memory(jobs_dir)
+
+    assert [item.text_cn for item in memory.translation_examples] == [
+        "\u4f60\u597d",
+        "\u795e\u79d8",
+        "\u5927\u738b",
+    ]
+    assert memory.translation_examples[0].confidence == 0.95
+    assert {item.name_cn for item in memory.characters} == {"\u5c0f\u660e", "\u5982\u6765\u4f5b"}
+    assert {item.source_text for item in memory.glossary} == {"\u795e\u79d8", "\u9662\u5b50"}
+    assert memory.warnings == []
+
+
+def test_collect_system_memory_prioritizes_reviewed_rows(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    first = jobs_dir / "first"
+    second = jobs_dir / "second"
+    (first / "translation").mkdir(parents=True)
+    (second / "translation").mkdir(parents=True)
+    (first / "translation" / "review.csv").write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-0001,0,1000,,\u4f60\u597d,Chao ban ban nhap,,draft\n",
+        encoding="utf-8-sig",
+    )
+    (second / "translation" / "review.csv").write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-0002,0,1000,,\u4f60\u597d,Xin chao,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+
+    memory = collect_system_memory(jobs_dir)
+
+    assert len(memory.translation_examples) == 1
+    assert memory.translation_examples[0].text_vi == "Xin chao"
+    assert memory.translation_examples[0].confidence == 0.95
+    assert memory.translation_examples[0].source_job == "second"
+
+
+def test_collect_system_memory_excludes_current_job(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    current = jobs_dir / "current"
+    old = jobs_dir / "old"
+    (current / "translation").mkdir(parents=True)
+    (old / "translation").mkdir(parents=True)
+    (current / "translation" / "review.csv").write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-0001,0,1000,,\u5f53\u524d,Current,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    (old / "translation" / "review.csv").write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-0002,0,1000,,\u5386\u53f2,History,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+
+    memory = collect_system_memory(jobs_dir, current_job=current)
+
+    assert [item.text_cn for item in memory.translation_examples] == ["\u5386\u53f2"]
+
+
+def test_collect_system_memory_records_json_warning_and_continues(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    job = jobs_dir / "broken"
+    (job / "translation").mkdir(parents=True)
+    (job / "context").mkdir()
+    (job / "translation" / "review.csv").write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        "m-0001,0,1000,,\u4f60\u597d,Xin chao,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    (job / "context" / "characters.json").write_text("{bad json", encoding="utf-8")
+
+    memory = collect_system_memory(jobs_dir)
+
+    assert [item.text_cn for item in memory.translation_examples] == ["\u4f60\u597d"]
+    assert len(memory.warnings) == 1
+    assert "characters.json" in memory.warnings[0].path
+    assert "Invalid JSON" in memory.warnings[0].message
