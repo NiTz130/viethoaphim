@@ -59,3 +59,46 @@ def test_run_auto_resumes_tts_and_render(monkeypatch, tmp_path):
     assert calls[0][0] == "review"
     assert calls[1] == ("resume", job)
     assert "Vietnamese subtitles written" in result.output
+
+
+def test_resume_runtime_error_is_click_error(monkeypatch, tmp_path):
+    from vietdub import cli
+    from vietdub.jobs import Job
+
+    job_root = tmp_path / "jobs" / "clip"
+    job_root.mkdir(parents=True)
+    job = Job(root=job_root, config={})
+
+    monkeypatch.setattr(cli, "_open_job", lambda job_dir, jobs_dir: job)
+
+    def fail_resume(job_arg, settings):
+        raise RuntimeError("bad review csv")
+
+    monkeypatch.setattr(cli, "resume_tts_and_render", fail_resume)
+
+    result = runner.invoke(app, ["resume", str(job_root), "--from", "tts"])
+
+    assert result.exit_code != 0
+    assert "bad review csv" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_inspect_uses_configured_jobs_dir(monkeypatch, tmp_path):
+    from vietdub import cli
+    from vietdub.jobs import Job
+
+    captured = {}
+    configured_jobs_dir = tmp_path / "configured-jobs"
+
+    def fake_open_job(job_dir, jobs_dir):
+        captured["job_dir"] = job_dir
+        captured["jobs_dir"] = jobs_dir
+        return Job(root=job_dir, config={})
+
+    monkeypatch.setenv("JOBS_DIR", str(configured_jobs_dir))
+    monkeypatch.setattr(cli, "_open_job", fake_open_job)
+
+    result = runner.invoke(app, ["inspect", "clip"])
+
+    assert result.exit_code == 0
+    assert captured["jobs_dir"] == configured_jobs_dir

@@ -56,7 +56,10 @@ def resume(
     settings = Settings()
     job = _open_job(job_dir, Path(settings.jobs_dir))
     if from_step == StepName.TTS:
-        srt_path = resume_tts_and_render(job, settings)
+        try:
+            srt_path = resume_tts_and_render(job, settings)
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from None
         safe_echo(f"Vietnamese subtitles written: {srt_path}")
         safe_echo("TTS segment files written under tts/segments.")
         return
@@ -66,7 +69,8 @@ def resume(
 
 @app.command()
 def inspect(job_dir: Path) -> None:
-    job = _open_job(job_dir, Path("jobs"))
+    settings = Settings()
+    job = _open_job(job_dir, Path(settings.jobs_dir))
     safe_echo(job.root)
     safe_echo(job.load_status())
 
