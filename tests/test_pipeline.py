@@ -34,6 +34,22 @@ def _patch_resume_media(monkeypatch):
     return calls
 
 
+def _write_review_csv(job_root, rows: list[str]) -> None:
+    review = job_root / "translation" / "review.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n" + "".join(rows),
+        encoding="utf-8-sig",
+    )
+
+
+def _assert_no_resume_render_artifacts(job: Job) -> None:
+    assert not (job.root / "output" / "subtitles_vi.srt").exists()
+    assert not (job.root / "tts" / "final_vi.wav").exists()
+    assert not (job.root / "output" / "preview_vi.mp4").exists()
+    assert "render" not in job.load_status()
+
+
 def test_fixture_pipeline_stops_after_review_csv(tmp_path):
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"fake-video")
@@ -112,6 +128,114 @@ def test_resume_tts_and_render_writes_output_srt(monkeypatch, tmp_path):
     status = json.loads((tmp_path / "job" / "status.json").read_text(encoding="utf-8"))
     assert status["render"]["details"]["final_audio"] == str(final_audio)
     assert status["render"]["details"]["preview"] == str(preview_path)
+
+
+def test_resume_tts_and_render_rejects_duplicate_active_segment_id(tmp_path):
+    job_root = tmp_path / "job"
+    _write_review_csv(
+        job_root,
+        [
+            "m-0001,0,1000,,\u4f60\u597d,Xin chao,,reviewed\n",
+            "m-0001,1000,2000,,\u4f60\u597d,Chao ban,,reviewed\n",
+        ],
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    job = Job(root=job_root, config={})
+
+    with pytest.raises(RuntimeError, match="Duplicate segment_id.*m-0001"):
+        resume_tts_and_render(job, _resume_settings())
+
+    _assert_no_resume_render_artifacts(job)
+    assert not (job_root / "tts" / "segments" / "m-0001.mp3").exists()
+
+
+def test_resume_tts_and_render_allows_duplicate_inactive_segment_id(monkeypatch, tmp_path):
+    job_root = tmp_path / "job"
+    _write_review_csv(
+        job_root,
+        [
+            "m-0001,0,1000,,\u4f60\u597d,Xin chao,,reviewed\n",
+            "m-0001,1000,2000,,\u4f60\u597d,Bo qua,,skip\n",
+            "m-0001,2000,3000,,\u4f60\u597d,,,reviewed\n",
+        ],
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    job = Job(root=job_root, config={})
+    _patch_resume_media(monkeypatch)
+
+    async def fake_synthesize_segment(self, row, output):
+        _write_valid_mp3(output, duration_ms=400)
+        return output
+
+    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
+
+    resume_tts_and_render(job, _resume_settings())
+
+    status = job.load_status()
+    assert status["render"]["details"]["segments"] == 1
+
+
+def test_resume_tts_and_render_rejects_negative_active_timing(tmp_path):
+    job_root = tmp_path / "job"
+    _write_review_csv(
+        job_root,
+        ["m-0001,-500,500,,\u4f60\u597d,Xin chao,,reviewed\n"],
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    job = Job(root=job_root, config={})
+
+    with pytest.raises(RuntimeError, match="Invalid timing.*m-0001"):
+        resume_tts_and_render(job, _resume_settings())
+
+    _assert_no_resume_render_artifacts(job)
+
+
+@pytest.mark.parametrize("mux_output", ["missing", "empty"])
+def test_resume_tts_and_render_rejects_missing_or_empty_preview_after_mux(monkeypatch, tmp_path, mux_output):
+    job_root = tmp_path / "job"
+    _write_review_csv(
+        job_root,
+        ["m-0001,0,1000,,\u4f60\u597d,Xin chao,,reviewed\n"],
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    job = Job(root=job_root, config={})
+    mux_calls = []
+
+    def fake_probe_media(video_path):
+        return {"format": {"duration": "1.000"}, "streams": []}
+
+    def fake_mux_preview(video, audio, subtitles, output):
+        mux_calls.append({"video": video, "audio": audio, "subtitles": subtitles, "output": output})
+        if mux_output == "empty":
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"")
+
+    async def fake_synthesize_segment(self, row, output):
+        _write_valid_mp3(output, duration_ms=400)
+        return output
+
+    monkeypatch.setattr("vietdub.media.probe_media", fake_probe_media)
+    monkeypatch.setattr("vietdub.media.mux_preview", fake_mux_preview)
+    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
+
+    with pytest.raises(RuntimeError, match="Preview was not created"):
+        resume_tts_and_render(job, _resume_settings())
+
+    final_audio = job_root / "tts" / "final_vi.wav"
+    sync_report = job_root / "tts" / "sync_report.json"
+    preview = job_root / "output" / "preview_vi.mp4"
+    assert final_audio.stat().st_size > 0
+    assert sync_report.exists()
+    assert not preview.exists()
+    assert "render" not in job.load_status()
+    assert mux_calls == [
+        {
+            "video": job.input_video,
+            "audio": final_audio,
+            "subtitles": job_root / "output" / "subtitles_vi.srt",
+            "output": preview,
+        }
+    ]
 
 
 def test_resume_tts_and_render_keeps_srt_when_tts_segment_fails(monkeypatch, tmp_path):

@@ -151,10 +151,18 @@ def _is_safe_fallback_segment_id(segment_id: str) -> bool:
 def _validate_resume_segment_ids(job: Job, rows: list[TranslationRow]) -> None:
     allowed_ids = _load_allowed_segment_ids(job)
     review_path = job.root / "translation" / "review.csv"
+    active_ids: set[str] = set()
     for row in rows:
         if row.status == "skip" or not row.text_vi.strip():
             continue
         segment_id = row.segment_id
+        if row.start_ms < 0 or row.end_ms <= row.start_ms:
+            raise RuntimeError(
+                f"Invalid timing in {review_path}: {segment_id!r} start_ms={row.start_ms} end_ms={row.end_ms}"
+            )
+        if segment_id in active_ids:
+            raise RuntimeError(f"Duplicate segment_id in {review_path}: {segment_id!r}")
+        active_ids.add(segment_id)
         if not _is_safe_segment_path_component(segment_id):
             raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r}")
         if allowed_ids is not None:
@@ -272,6 +280,9 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     except Exception:  # noqa: BLE001 - do not leave stale or partial previews after mux failure.
         preview.unlink(missing_ok=True)
         raise
+    if not preview.exists() or preview.stat().st_size == 0:
+        preview.unlink(missing_ok=True)
+        raise RuntimeError(f"Preview was not created: {preview}")
     synced_segments = sum(1 for segment in sync_report.segments if segment.synced_duration_ms > 0)
     skipped_segments = sum(1 for segment in sync_report.segments if segment.synced_duration_ms == 0)
     job.mark_done(
