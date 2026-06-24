@@ -35,3 +35,29 @@ def test_context_bundle_includes_reference_context():
 
     assert bundle["reference_context"] == reference_context
     assert "Use reference_context" in bundle["style_guide"]["translation_rules"][-1]
+
+
+def test_context_bundle_derives_characters_and_glossary_from_reference_context():
+    reference_context = {
+        "Names.txt": [{"source": "\u5982\u6765\u4f5b", "target": "Ph\u1eadt Nh\u01b0 Lai"}],
+        "Pronouns.txt": [{"source": "\u4f60", "target": "ng\u01b0\u01a1i"}],
+        "VietPhrase.txt": [{"source": "\u795e\u79d8", "target": "th\u1ea7n b\u00ed"}],
+    }
+
+    bundle = build_context_bundle(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="\u5982\u6765\u4f5b\u4f60\u6709\u795e\u79d8")],
+        series_context={},
+        reference_context=reference_context,
+    )
+
+    assert bundle["characters"] == [
+        {
+            "name_cn": "\u5982\u6765\u4f5b",
+            "name_vi": "Ph\u1eadt Nh\u01b0 Lai",
+            "source": "Names.txt",
+        }
+    ]
+    assert bundle["glossary"] == {
+        "\u4f60": "ng\u01b0\u01a1i",
+        "\u795e\u79d8": "th\u1ea7n b\u00ed",
+    }

@@ -13,22 +13,45 @@ SCENE_SUMMARY = (
 )
 
 
+def derive_characters(reference_context: dict) -> list[dict[str, str]]:
+    return [
+        {
+            "name_cn": entry["source"],
+            "name_vi": entry["target"].split("/")[0],
+            "source": "Names.txt",
+        }
+        for entry in reference_context.get("Names.txt", [])
+    ]
+
+
+def derive_glossary(reference_context: dict) -> dict[str, str]:
+    glossary: dict[str, str] = {}
+    for filename, entries in reference_context.items():
+        if filename == "Names.txt":
+            continue
+        for entry in entries:
+            glossary[entry["source"]] = entry["target"]
+    return glossary
+
+
 def build_context_bundle(
     segments: list[TimedSegment],
     series_context: dict,
     reference_context: dict | None = None,
 ) -> dict:
+    reference_context = reference_context or {}
     joined = " ".join(segment.text for segment in segments[:20])
     scene_ids = [segment.id for segment in segments[:20]]
+    characters = derive_characters(reference_context)
     return {
         "series_context": series_context,
-        "reference_context": reference_context or {},
+        "reference_context": reference_context,
         "episode_context": {
             "summary": EPISODE_SUMMARY,
             "source_excerpt": joined,
         },
-        "characters": [],
-        "glossary": {},
+        "characters": characters,
+        "glossary": derive_glossary(reference_context),
         "style_guide": {
             "tone": DEFAULT_TONE,
             "translation_rules": [
@@ -42,7 +65,7 @@ def build_context_bundle(
             {
                 "segment_ids": scene_ids,
                 "summary": SCENE_SUMMARY,
-                "characters": [],
+                "characters": [character["name_vi"] for character in characters],
                 "tone": DEFAULT_TONE,
             }
         ],
