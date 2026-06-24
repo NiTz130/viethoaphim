@@ -46,6 +46,7 @@ def run_fixture_pipeline(video: Path, jobs_dir: Path, stt_fixture: Path, ocr_fix
 def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, settings) -> Job:
     from .config import Settings
     from .media import extract_audio
+    from .memory import collect_system_memory, select_relevant_memory
     from .ocr import PaddleSubtitleOcrEngine
     from .reference import build_reference_context
     from .stt import FasterWhisperSttEngine
@@ -61,7 +62,14 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     ocr_segments = PaddleSubtitleOcrEngine().recognize(job.input_video)
     merged = merge_segments(stt_segments, ocr_segments)
     reference_context = build_reference_context(merged, Path(typed_settings.reference_data_dir))
-    context_bundle = build_context_bundle(merged, series_context={}, reference_context=reference_context)
+    raw_system_memory = collect_system_memory(jobs_dir, current_job=job.root)
+    selected_system_memory = select_relevant_memory(raw_system_memory, merged)
+    context_bundle = build_context_bundle(
+        merged,
+        series_context={},
+        reference_context=reference_context,
+        system_memory=selected_system_memory,
+    )
     translations = translate_with_llm(
         merged,
         context_bundle,
@@ -75,6 +83,8 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     write_segments(job, "transcript/merged.json", merged)
     for name, value in context_bundle.items():
         job.write_json(f"context/{name}.json", value)
+    if raw_system_memory.warnings:
+        job.write_json("context/system_memory_warnings.json", [warning.model_dump() for warning in raw_system_memory.warnings])
     job.write_json("translation/translated.json", [row.model_dump() for row in translations])
     export_review_csv(job.root / "translation" / "review.csv", merged, translations)
     return job
