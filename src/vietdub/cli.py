@@ -67,8 +67,7 @@ def resume(
         safe_echo(f"Vietnamese subtitles written: {srt_path}")
         safe_echo("TTS segment files written under tts/segments.")
         return
-    steps = ", ".join(step.value for step in job.steps_from(from_step))
-    safe_echo(f"Resume order: {steps}")
+    raise click.ClickException("Only resume from tts is currently supported.")
 
 
 @app.command()

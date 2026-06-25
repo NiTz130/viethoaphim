@@ -109,6 +109,21 @@ def test_resume_runtime_error_is_click_error(monkeypatch, tmp_path):
     assert "Traceback" not in result.output
 
 
+def test_resume_rejects_unsupported_from_step(monkeypatch, tmp_path):
+    from vietdub.jobs import Job
+
+    job_root = tmp_path / "jobs" / "clip"
+    job_root.mkdir(parents=True)
+    job = Job(root=job_root, config={})
+
+    monkeypatch.setattr("vietdub.cli._open_job", lambda job_dir, jobs_dir: job)
+
+    result = runner.invoke(app, ["resume", str(job_root), "--from", "stt"])
+
+    assert result.exit_code != 0
+    assert "Only resume from tts is currently supported" in result.output
+
+
 def test_inspect_opens_bare_job_name_from_configured_jobs_dir(monkeypatch, tmp_path):
     jobs_dir = tmp_path / "configured-jobs"
     job_root = jobs_dir / "clip"
