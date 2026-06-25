@@ -30,6 +30,47 @@ def test_review_csv_round_trip(tmp_path):
     assert loaded[0].text_vi == "Ch\u00e0o nha"
 
 
+def test_export_review_csv_preserves_segment_timing_and_source_text(tmp_path):
+    segments = [
+        TimedSegment(
+            id="m-0001",
+            start_ms=0,
+            end_ms=1000,
+            text="\u4f60\u597d",
+            speaker="\u7537",
+        )
+    ]
+    rows = [
+        TranslationRow(
+            segment_id="m-0001",
+            start_ms=9999,
+            end_ms=12000,
+            speaker="\u5973",
+            text_cn="\u9519\u8bef",
+            text_vi="Chao ban",
+            context_note="giu giong hai",
+            status="reviewed",
+        )
+    ]
+    path = tmp_path / "review.csv"
+
+    export_review_csv(path, segments, rows)
+    loaded = import_review_csv(path)
+
+    assert loaded == [
+        TranslationRow(
+            segment_id="m-0001",
+            start_ms=0,
+            end_ms=1000,
+            speaker="\u7537",
+            text_cn="\u4f60\u597d",
+            text_vi="Chao ban",
+            context_note="giu giong hai",
+            status="reviewed",
+        )
+    ]
+
+
 def test_translation_prompt_explicitly_requests_json_output():
     prompt = build_translation_prompt(
         [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="\u4f60\u597d")],

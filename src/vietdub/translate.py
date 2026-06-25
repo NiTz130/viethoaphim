@@ -122,16 +122,16 @@ def export_review_csv(path: Path, segments: list[TimedSegment], translations: li
         writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
         writer.writeheader()
         for segment in segments:
-            row = by_id.get(
-                segment.id,
-                TranslationRow(
-                    segment_id=segment.id,
-                    start_ms=segment.start_ms,
-                    end_ms=segment.end_ms,
-                    speaker=segment.speaker,
-                    text_cn=segment.text,
-                    text_vi="",
-                ),
+            translated = by_id.get(segment.id)
+            row = TranslationRow(
+                segment_id=segment.id,
+                start_ms=segment.start_ms,
+                end_ms=segment.end_ms,
+                speaker=segment.speaker,
+                text_cn=segment.text,
+                text_vi=translated.text_vi if translated else "",
+                context_note=translated.context_note if translated else "",
+                status=translated.status if translated else "draft",
             )
             writer.writerow(row.model_dump())
 
