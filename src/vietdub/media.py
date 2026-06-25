@@ -50,8 +50,12 @@ def probe_media(video: Path) -> dict[str, Any]:
     return json.loads(completed.stdout)
 
 
+def escape_subtitle_filter_path(path: Path) -> str:
+    return str(path).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+
+
 def build_mux_preview_command(video: Path, audio: Path, subtitles: Path, output: Path) -> list[str]:
-    escaped_subtitles = str(subtitles).replace("\\", "/").replace(":", "\\:")
+    escaped_subtitles = escape_subtitle_filter_path(subtitles)
     return [
         "ffmpeg",
         "-y",

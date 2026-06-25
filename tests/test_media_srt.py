@@ -27,3 +27,18 @@ def test_mux_preview_command_maps_video_audio_and_subtitles(tmp_path):
     joined = " ".join(str(part) for part in command)
     assert "subtitles=" in joined
     assert str(tmp_path / "preview.mp4") in joined
+
+
+def test_mux_preview_command_escapes_apostrophe_in_subtitle_path(tmp_path):
+    subtitles = tmp_path / "Bob's captions.srt"
+
+    command = build_mux_preview_command(
+        video=tmp_path / "in.mp4",
+        audio=tmp_path / "vi.wav",
+        subtitles=subtitles,
+        output=tmp_path / "preview.mp4",
+    )
+
+    filter_arg = command[command.index("-vf") + 1]
+    assert "Bob\\'s captions.srt" in filter_arg
+    assert "Bob's captions.srt" not in filter_arg
