@@ -19,6 +19,14 @@ class FixtureOcrEngine:
         return [TimedSegment.model_validate(item) for item in data]
 
 
+def _clear_generated_ocr_frames(frame_dir: Path) -> None:
+    if not frame_dir.exists():
+        return
+    for frame in frame_dir.glob("frame_*.jpg"):
+        if frame.is_file():
+            frame.unlink()
+
+
 class PaddleSubtitleOcrEngine:
     def __init__(self, sample_every_seconds: float = 0.5) -> None:
         self.sample_every_seconds = sample_every_seconds
@@ -31,6 +39,7 @@ class PaddleSubtitleOcrEngine:
         ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False, use_gpu=False, enable_mkldnn=False)
         frame_dir = video_path.parent / "ocr_frames"
         frame_dir.mkdir(parents=True, exist_ok=True)
+        _clear_generated_ocr_frames(frame_dir)
         pattern = frame_dir / "frame_%06d.jpg"
         command = [
             "ffmpeg",

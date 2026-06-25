@@ -1,4 +1,6 @@
 import json
+import sys
+import types
 
 from vietdub.ocr import FixtureOcrEngine
 from vietdub.stt import FixtureSttEngine
@@ -22,3 +24,42 @@ def test_fixture_ocr_engine_loads_segments(tmp_path):
     )
     result = FixtureOcrEngine(fixture).recognize(tmp_path / "video.mp4")
     assert result[0].source == "ocr"
+
+
+def test_paddle_ocr_engine_clears_stale_frames_before_extract(monkeypatch, tmp_path):
+    from vietdub.ocr import PaddleSubtitleOcrEngine
+
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"fake-video")
+    frame_dir = tmp_path / "ocr_frames"
+    frame_dir.mkdir()
+    stale_frame = frame_dir / "frame_000001.jpg"
+    stale_frame.write_bytes(b"old")
+    keep_file = frame_dir / "notes.txt"
+    keep_file.write_text("keep", encoding="utf-8")
+    observed_before_extract = {}
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def ocr(self, frame, cls=True):
+            return [[[[[0, 0], [1, 1]], ("\u4f60\u597d", 0.99)]]]
+
+    fake_paddleocr = types.ModuleType("paddleocr")
+    fake_paddleocr.PaddleOCR = FakePaddleOCR
+    monkeypatch.setitem(sys.modules, "paddleocr", fake_paddleocr)
+
+    def fake_run(command, **kwargs):
+        observed_before_extract["stale_exists"] = stale_frame.exists()
+        stale_frame.write_bytes(b"new")
+        return type("Completed", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+
+    monkeypatch.setattr("vietdub.ocr.subprocess.run", fake_run)
+    monkeypatch.setattr("vietdub.ocr._guard_optional_torch_import", lambda: None)
+
+    result = PaddleSubtitleOcrEngine(sample_every_seconds=0.5).recognize(video)
+
+    assert observed_before_extract == {"stale_exists": False}
+    assert keep_file.exists()
+    assert result[0].text == "\u4f60\u597d"
