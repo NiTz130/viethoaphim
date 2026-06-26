@@ -562,7 +562,7 @@ def test_resume_tts_rejects_duplicate_unsafe_segment_id_with_invalid_message(mon
 
     message = str(exc_info.value)
     assert "Invalid segment_id" in message
-    assert "evil" in message
+    assert repr(unsafe_id) in message
     assert "Duplicate" not in message
     assert not called
     assert not (job_root / "tts" / "evil.mp3").exists()
