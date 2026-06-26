@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from vietdub.models import TimedSegment, TranslationRow
@@ -94,6 +96,33 @@ def test_parse_translation_response_requires_translations_list():
 def test_parse_translation_response_identifies_bad_item():
     with pytest.raises(RuntimeError, match="translation item 1"):
         parse_translation_response('{"translations": ["not an object"]}')
+
+
+def test_parse_translation_response_warns_and_coerces_invalid_status(capsys):
+    """H4 fix: LLM returns an invalid status; we log to stderr AND coerce to 'draft'."""
+    payload = json.dumps(
+        {
+            "translations": [
+                {
+                    "segment_id": "m-0001",
+                    "start_ms": 0,
+                    "end_ms": 1000,
+                    "speaker": None,
+                    "text_cn": "你好",
+                    "text_vi": "Xin chào",
+                    "context_note": "",
+                    "status": "published",  # invalid
+                }
+            ]
+        }
+    )
+
+    rows = parse_translation_response(payload)
+
+    assert rows[0].status == "draft"
+    captured = capsys.readouterr()
+    assert "invalid status" in captured.err
+    assert "m-0001" in captured.err
 
 
 def test_import_review_csv_rejects_missing_columns(tmp_path):

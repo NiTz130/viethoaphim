@@ -67,7 +67,7 @@ ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
 TTS_API_KEY=sk-...                  # can be the same as ANTHROPIC_API_KEY
 TTS_VOICE_ID=vi-female-1
 TTS_MODEL=speech-2.8-hd
-TTS_BASE_URL=https://api.minimax.io/v1/t2a_v2
+TTS_BASE_URL=https://api.minimax.io/v1
 
 STT_MODEL=medium
 STT_LANGUAGE=zh

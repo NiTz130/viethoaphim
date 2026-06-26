@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     tts_voice_id: str = "vi-VN-HoaiMyNeural"
     tts_model: str = "speech-2.8-hd"
-    tts_base_url: str = "https://api.minimax.io/v1/t2a_v2"
+    tts_base_url: str = "https://api.minimax.io/v1"
     tts_api_key: str = ""
     tts_timeout: float = 30.0
 

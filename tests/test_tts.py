@@ -131,3 +131,54 @@ async def test_minimax_tts_engine_raises_on_baseresp_error(tmp_path, monkeypatch
     engine = MiniMaxTtsEngine(voice_id="bad", api_key="k", base_url="https://x")
     with pytest.raises(RuntimeError, match="voice not found"):
         await engine.synthesize_segment(_row(), tmp_path / "out.mp3")
+
+
+@pytest.mark.asyncio
+async def test_minimax_tts_engine_raises_on_network_error(tmp_path, monkeypatch):
+    class _BoomClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, json=None, headers=None):
+            import httpx
+            raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr("httpx.AsyncClient", _BoomClient)
+
+    engine = MiniMaxTtsEngine(voice_id="v", api_key="k", base_url="https://x")
+    with pytest.raises(RuntimeError, match="network error"):
+        await engine.synthesize_segment(_row(), tmp_path / "out.mp3")
+
+
+@pytest.mark.asyncio
+async def test_minimax_tts_engine_raises_when_api_key_missing(tmp_path):
+    engine = MiniMaxTtsEngine(voice_id="v", api_key="", base_url="https://x")
+    with pytest.raises(RuntimeError, match="TTS_API_KEY is required"):
+        await engine.synthesize_segment(_row(), tmp_path / "out.mp3")
+
+
+@pytest.mark.asyncio
+async def test_minimax_tts_engine_appends_t2a_v2_to_base_url(tmp_path, monkeypatch):
+    """Lock in the contract: base_url is a base, engine appends /t2a_v2.
+    Catches the regression where the default tts_base_url includes /t2a_v2
+    and the engine double-appends it, producing a 404."""
+    payload = {
+        "data": {"audio": b"ok".hex(), "status": 2},
+        "base_resp": {"status_code": 0, "status_msg": "success"},
+    }
+    fake = _install_fake_httpx(monkeypatch, payload)
+
+    engine = MiniMaxTtsEngine(
+        voice_id="v",
+        api_key="k",
+        base_url="https://api.minimax.io/v1",
+    )
+    await engine.synthesize_segment(_row(), tmp_path / "out.mp3")
+
+    assert fake.post_calls[0]["url"] == "https://api.minimax.io/v1/t2a_v2"

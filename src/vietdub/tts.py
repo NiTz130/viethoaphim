@@ -23,6 +23,8 @@ class MiniMaxTtsEngine:
         self.timeout = timeout
 
     async def synthesize_segment(self, row: TranslationRow, output: Path) -> Path:
+        if not self.api_key:
+            raise RuntimeError("TTS_API_KEY is required for TTS")
         output.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "model": self.model,
