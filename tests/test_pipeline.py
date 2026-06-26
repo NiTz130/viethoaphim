@@ -527,6 +527,47 @@ def test_resume_tts_rejects_transcript_path_traversal_segment_id(monkeypatch, tm
     assert not (job_root / "tts" / "evil.mp3").exists()
 
 
+def test_resume_tts_rejects_duplicate_unsafe_segment_id_with_invalid_message(monkeypatch, tmp_path):
+    """C2 regression: unsafe ID appearing twice must report 'Invalid segment_id'
+    for the first occurrence, never 'Duplicate segment_id' which would mask the
+    real issue (path traversal in the segment_id itself)."""
+    job_root = tmp_path / "job"
+    unsafe_id = "..\\evil"
+    review = job_root / "translation" / "review.csv"
+    review.parent.mkdir(parents=True)
+    review.write_text(
+        "segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        f"{unsafe_id},0,1000,,你好,Xin chao,,reviewed\n"
+        f"{unsafe_id},1000,2000,,你好,Xin chao tiep,,reviewed\n",
+        encoding="utf-8-sig",
+    )
+    (job_root / "transcript").mkdir()
+    (job_root / "transcript" / "merged.json").write_text(
+        json.dumps([{"id": unsafe_id, "start_ms": 0, "end_ms": 1000, "text": "你好", "source": "ocr"}]),
+        encoding="utf-8",
+    )
+    (job_root / "input.mp4").write_bytes(b"fake")
+    job = Job(root=job_root, config={})
+    called = False
+
+    async def fail_synthesize_segment(self, row, output):
+        nonlocal called
+        called = True
+        raise AssertionError("synthesis should not run for unsafe segment_id")
+
+    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        resume_tts_and_render(job, _resume_settings())
+
+    message = str(exc_info.value)
+    assert "Invalid segment_id" in message
+    assert "evil" in message
+    assert "Duplicate" not in message
+    assert not called
+    assert not (job_root / "tts" / "evil.mp3").exists()
+
+
 def test_resume_tts_rejects_transcript_windows_absolute_segment_id(monkeypatch, tmp_path):
     job_root = tmp_path / "job"
     unsafe_id = "C:\\temp\\evil"
