@@ -67,10 +67,13 @@ class JobManager:
     def create(self, video: Path, series: str | None) -> Job:
         root = self.jobs_dir / video.stem
         suffix = 1
-        while root.exists():
-            root = self.jobs_dir / f"{video.stem}-{suffix}"
-            suffix += 1
-        root.mkdir(parents=True)
+        while True:
+            try:
+                root.mkdir(parents=True)
+                break
+            except FileExistsError:
+                root = self.jobs_dir / f"{video.stem}-{suffix}"
+                suffix += 1
         for relative in JOB_DIRS:
             (root / relative).mkdir(parents=True, exist_ok=True)
         shutil.copy2(video, root / "input.mp4")
