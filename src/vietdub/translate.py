@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import sys
+import time
 from json import JSONDecodeError
 from pathlib import Path
 
@@ -92,6 +93,9 @@ def build_translation_prompt(segments: list[TimedSegment], context_bundle: dict)
 
 
 LLM_BATCH_SIZE = 50
+LLM_MAX_RETRIES = 3
+LLM_RETRY_BACKOFF_S = 1.0
+LLM_RETRY_BACKOFF_FACTOR = 2.0
 
 
 def translate_with_llm(
@@ -113,7 +117,7 @@ def translate_with_llm(
     all_rows: list[TranslationRow] = []
     for start in range(0, len(segments), LLM_BATCH_SIZE):
         batch = segments[start:start + LLM_BATCH_SIZE]
-        all_rows.extend(_translate_one_batch(batch, context_bundle, settings))
+        all_rows.extend(_translate_one_batch_with_retry(batch, context_bundle, settings))
     return all_rows
 
 
@@ -154,6 +158,59 @@ def _translate_one_batch(
         raise RuntimeError("MiniMax returned empty response (no text content blocks)")
     content = "".join(text_parts)
     return parse_translation_response(content)
+
+
+def _translate_one_batch_with_retry(
+    segments: list[TimedSegment],
+    context_bundle: dict,
+    settings,
+) -> list[TranslationRow]:
+    """Call _translate_one_batch with exponential-backoff retry on transient errors.
+
+    `_translate_one_batch` wraps API errors as `RuntimeError` (with the original
+    exception preserved as `__cause__`). The retry helper unwraps that cause to
+    decide whether to retry, so this helper is functional today. Once Task 2
+    removes the wrapping from `_translate_one_batch`, this helper will continue
+    to work the same way (it just looks at one fewer layer). The `anthropic`
+    module is resolved via `sys.modules` so test mocks that omit exception
+    classes degrade gracefully to a pass-through.
+    """
+    anthropic_mod = sys.modules.get("anthropic")
+    if anthropic_mod is None:
+        import anthropic as anthropic_mod
+    api_connection_error = getattr(anthropic_mod, "APIConnectionError", ())
+    api_status_error = getattr(anthropic_mod, "APIStatusError", ())
+    authentication_error = getattr(anthropic_mod, "AuthenticationError", ())
+
+    last_exc: Exception | None = None
+    for attempt in range(LLM_MAX_RETRIES + 1):
+        try:
+            return _translate_one_batch(segments, context_bundle, settings)
+        except RuntimeError as exc:
+            cause = exc.__cause__ if exc.__cause__ is not None else exc
+            if authentication_error and isinstance(cause, authentication_error):
+                raise
+            if api_connection_error and isinstance(cause, api_connection_error):
+                last_exc = cause
+                if attempt == LLM_MAX_RETRIES:
+                    break
+                time.sleep(LLM_RETRY_BACKOFF_S * (LLM_RETRY_BACKOFF_FACTOR ** attempt))
+                continue
+            if api_status_error and isinstance(cause, api_status_error):
+                last_exc = cause
+                status = getattr(cause, "status_code", None)
+                if status not in {429, 500, 502, 503, 504}:
+                    raise
+                if attempt == LLM_MAX_RETRIES:
+                    break
+                time.sleep(LLM_RETRY_BACKOFF_S * (LLM_RETRY_BACKOFF_FACTOR ** attempt))
+                continue
+            # Non-API RuntimeError (e.g. empty response, parse error): don't retry.
+            raise
+
+    raise RuntimeError(
+        f"MiniMax batch failed after {LLM_MAX_RETRIES + 1} attempts: {last_exc}"
+    ) from last_exc
 
 
 def export_review_csv(path: Path, segments: list[TimedSegment], translations: list[TranslationRow]) -> None:
