@@ -161,17 +161,16 @@ def _validate_resume_segment_ids(job: Job, rows: list[TranslationRow]) -> None:
             raise RuntimeError(
                 f"Invalid timing in {review_path}: {segment_id!r} start_ms={row.start_ms} end_ms={row.end_ms}"
             )
-        if segment_id in active_ids:
-            raise RuntimeError(f"Duplicate segment_id in {review_path}: {segment_id!r}")
-        active_ids.add(segment_id)
         if not _is_safe_segment_path_component(segment_id):
             raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r}")
         if allowed_ids is not None:
             if segment_id not in allowed_ids:
                 raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r} is not in transcript/merged.json")
-            continue
-        if not _is_safe_fallback_segment_id(segment_id):
+        elif not _is_safe_fallback_segment_id(segment_id):
             raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r}")
+        if segment_id in active_ids:
+            raise RuntimeError(f"Duplicate segment_id in {review_path}: {segment_id!r}")
+        active_ids.add(segment_id)
 
 
 def _probe_video_duration_ms(job: Job) -> int | None:
