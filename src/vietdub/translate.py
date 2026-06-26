@@ -72,17 +72,37 @@ def build_translation_prompt(segments: list[TimedSegment], context_bundle: dict)
     return json.dumps(payload, ensure_ascii=False)
 
 
+LLM_BATCH_SIZE = 50
+
+
 def translate_with_llm(
     segments: list[TimedSegment],
     context_bundle: dict,
     *,
     settings,
 ) -> list[TranslationRow]:
+    """Translate segments by batching them into LLM calls.
+
+    A single LLM call cannot handle hundreds of segments within max_tokens
+    limits, so we batch into groups of LLM_BATCH_SIZE and concatenate results.
+    """
     if not settings.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is required for translation")
     if not settings.llm_model:
         raise RuntimeError("LLM_MODEL is required for translation")
 
+    all_rows: list[TranslationRow] = []
+    for start in range(0, len(segments), LLM_BATCH_SIZE):
+        batch = segments[start:start + LLM_BATCH_SIZE]
+        all_rows.extend(_translate_one_batch(batch, context_bundle, settings))
+    return all_rows
+
+
+def _translate_one_batch(
+    segments: list[TimedSegment],
+    context_bundle: dict,
+    settings,
+) -> list[TranslationRow]:
     import anthropic
 
     client = anthropic.Anthropic(
@@ -98,7 +118,7 @@ def translate_with_llm(
     try:
         response = client.messages.create(
             model=settings.llm_model,
-            max_tokens=4096,
+            max_tokens=8192,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
