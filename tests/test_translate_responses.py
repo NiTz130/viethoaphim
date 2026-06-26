@@ -46,6 +46,46 @@ class _FakeAnthropic:
         self.__class__.instances.append(self)
 
 
+class _BatchAwareMessages:
+    """Mock that returns rows matching the input batch size and segment IDs."""
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        # Parse segment count from user_prompt (JSON-encoded in messages[0]["content"])
+        user_prompt = kwargs["messages"][0]["content"]
+        payload = json.loads(user_prompt)
+        batch_segments = payload["segments"]
+        translations = [
+            {
+                "segment_id": seg["id"],
+                "start_ms": seg["start_ms"],
+                "end_ms": seg["end_ms"],
+                "speaker": seg.get("speaker"),
+                "text_cn": seg.get("text", ""),
+                "text_vi": f"translation of {seg['id']}",
+                "context_note": "",
+                "status": "draft",
+            }
+            for seg in batch_segments
+        ]
+        return types.SimpleNamespace(
+            content=[_TextBlock(json.dumps({"translations": translations}))],
+            stop_reason="end_turn",
+        )
+
+
+class _BatchAwareAnthropic:
+    instances = []
+
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+        self.messages = _BatchAwareMessages()
+        self.__class__.instances.append(self)
+
+
 def _settings(**overrides):
     base = {
         "anthropic_api_key": "test-key",
@@ -513,5 +553,73 @@ def test_translate_with_llm_warns_for_unknown_model(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "some-future-model-xyz" in captured.err
     assert "KNOWN_MODEL_OUTPUT_CAPS" in captured.err
+
+
+def test_translate_with_llm_batches_50_segments_into_one_call(monkeypatch):
+    _BatchAwareAnthropic.instances = []
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_BatchAwareAnthropic))
+
+    segments = [
+        TimedSegment(id=f"m-{i:04d}", start_ms=i * 1000, end_ms=(i + 1) * 1000, text=f"text {i}")
+        for i in range(50)
+    ]
+
+    rows = translate_with_llm(segments=segments, context_bundle={}, settings=_settings())
+
+    assert len(rows) == 50
+    assert len(_BatchAwareAnthropic.instances) == 1
+    assert len(_BatchAwareAnthropic.instances[0].messages.calls) == 1
+
+
+def test_translate_with_llm_batches_51_segments_into_two_calls(monkeypatch):
+    _BatchAwareAnthropic.instances = []
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_BatchAwareAnthropic))
+
+    segments = [
+        TimedSegment(id=f"m-{i:04d}", start_ms=i * 1000, end_ms=(i + 1) * 1000, text=f"text {i}")
+        for i in range(51)
+    ]
+
+    rows = translate_with_llm(segments=segments, context_bundle={}, settings=_settings())
+
+    assert len(rows) == 51
+    assert len(_BatchAwareAnthropic.instances) == 2
+    # First call covers m-0000..m-0049 (50 segments)
+    first_payload = json.loads(
+        _BatchAwareAnthropic.instances[0].messages.calls[0]["messages"][0]["content"]
+    )
+    assert len(first_payload["segments"]) == 50
+    assert first_payload["segments"][0]["id"] == "m-0000"
+    # Second call covers m-0050 (1 segment)
+    second_payload = json.loads(
+        _BatchAwareAnthropic.instances[1].messages.calls[0]["messages"][0]["content"]
+    )
+    assert len(second_payload["segments"]) == 1
+    assert second_payload["segments"][0]["id"] == "m-0050"
+
+
+def test_translate_with_llm_batches_100_segments_into_two_calls(monkeypatch):
+    _BatchAwareAnthropic.instances = []
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_BatchAwareAnthropic))
+
+    segments = [
+        TimedSegment(id=f"m-{i:04d}", start_ms=i * 1000, end_ms=(i + 1) * 1000, text=f"text {i}")
+        for i in range(100)
+    ]
+
+    rows = translate_with_llm(segments=segments, context_bundle={}, settings=_settings())
+
+    assert len(rows) == 100
+    assert len(_BatchAwareAnthropic.instances) == 2
+
+
+def test_translate_with_llm_handles_empty_segments(monkeypatch):
+    _BatchAwareAnthropic.instances = []
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_BatchAwareAnthropic))
+
+    rows = translate_with_llm(segments=[], context_bundle={}, settings=_settings())
+
+    assert rows == []
+    assert len(_BatchAwareAnthropic.instances) == 0
 
 
