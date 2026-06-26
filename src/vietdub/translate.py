@@ -45,12 +45,18 @@ def _strip_markdown_fences(content: str) -> str:
 def parse_translation_response(content: str) -> list[TranslationRow]:
     try:
         data = json.loads(content)
-    except JSONDecodeError:
+    except JSONDecodeError as exc_raw:
         # Retry after stripping markdown code fences (LLMs sometimes wrap JSON in ```json ... ```)
         try:
             data = json.loads(_strip_markdown_fences(content))
-        except JSONDecodeError as exc:
-            raise RuntimeError(f"Invalid LLM translation response: invalid JSON at char {exc.pos}") from exc
+        except JSONDecodeError as exc_stripped:
+            new_exc = RuntimeError(
+                f"Invalid LLM translation response: invalid JSON at char {exc_stripped.pos}"
+            )
+            new_exc.add_note(
+                f"Raw (pre-strip) JSON also failed at char {exc_raw.pos}: {exc_raw.msg}"
+            )
+            raise new_exc from exc_stripped
 
     if not isinstance(data, dict):
         raise RuntimeError("Invalid LLM translation response: expected a JSON object")

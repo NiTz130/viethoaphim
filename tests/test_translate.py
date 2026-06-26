@@ -185,6 +185,15 @@ def test_parse_translation_response_handles_crlf_fences():
     assert rows[0].segment_id == "m-0001"
 
 
+def test_parse_translation_response_preserves_raw_error_context():
+    with pytest.raises(RuntimeError, match="Invalid LLM translation response") as exc_info:
+        parse_translation_response("Not valid JSON at all")
+
+    assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("Raw (pre-strip) JSON also failed" in n for n in notes)
+
+
 def test_import_review_csv_rejects_missing_columns(tmp_path):
     path = tmp_path / "review.csv"
     path.write_text("segment_id,start_ms,end_ms,text_cn,text_vi\nm-0001,0,1000,\u4f60\u597d,Xin chao\n", encoding="utf-8-sig")
