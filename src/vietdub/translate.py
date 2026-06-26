@@ -167,13 +167,14 @@ def _translate_one_batch_with_retry(
 ) -> list[TranslationRow]:
     """Call _translate_one_batch with exponential-backoff retry on transient errors.
 
-    `_translate_one_batch` wraps API errors as `RuntimeError` (with the original
-    exception preserved as `__cause__`). The retry helper unwraps that cause to
-    decide whether to retry, so this helper is functional today. Once Task 2
-    removes the wrapping from `_translate_one_batch`, this helper will continue
-    to work the same way (it just looks at one fewer layer). The `anthropic`
-    module is resolved via `sys.modules` so test mocks that omit exception
-    classes degrade gracefully to a pass-through.
+    This helper handles both exception shapes from `_translate_one_batch`:
+    the current shape (API errors wrapped as `RuntimeError` with the original
+    `anthropic.*` exception preserved as `__cause__`) and the future shape
+    (bare `anthropic.*` exceptions raised directly). Retries on transient
+    errors (connection failures and 429/5xx status codes) with exponential
+    backoff; wraps non-retryable failures and final exhausted retries as
+    `RuntimeError`. The `anthropic` module is resolved via `sys.modules` so
+    test mocks that omit exception classes degrade gracefully to a pass-through.
     """
     anthropic_mod = sys.modules.get("anthropic")
     if anthropic_mod is None:
@@ -187,6 +188,10 @@ def _translate_one_batch_with_retry(
         try:
             return _translate_one_batch(segments, context_bundle, settings)
         except RuntimeError as exc:
+            # Current path: _translate_one_batch wraps API errors as RuntimeError.
+            # Unwrap the cause and apply the same retry logic as if the underlying
+            # anthropic.* exception had been raised directly. Preserve the
+            # inner RuntimeError message (do not re-wrap).
             cause = exc.__cause__ if exc.__cause__ is not None else exc
             if authentication_error and isinstance(cause, authentication_error):
                 raise
@@ -207,6 +212,24 @@ def _translate_one_batch_with_retry(
                 continue
             # Non-API RuntimeError (e.g. empty response, parse error): don't retry.
             raise
+        except api_connection_error as exc:
+            # Future path: _translate_one_batch raises bare anthropic.APIConnectionError.
+            last_exc = exc
+            if attempt == LLM_MAX_RETRIES:
+                break
+            time.sleep(LLM_RETRY_BACKOFF_S * (LLM_RETRY_BACKOFF_FACTOR ** attempt))
+        except api_status_error as exc:
+            # Future path: _translate_one_batch raises bare anthropic.APIStatusError
+            # (or its AuthenticationError subclass).
+            last_exc = exc
+            status = getattr(exc, "status_code", None)
+            if status not in {429, 500, 502, 503, 504}:
+                if authentication_error and isinstance(exc, authentication_error):
+                    raise RuntimeError(f"MiniMax authentication failed: {exc}") from exc
+                raise RuntimeError(f"MiniMax HTTP {status}: {exc.message}") from exc
+            if attempt == LLM_MAX_RETRIES:
+                break
+            time.sleep(LLM_RETRY_BACKOFF_S * (LLM_RETRY_BACKOFF_FACTOR ** attempt))
 
     raise RuntimeError(
         f"MiniMax batch failed after {LLM_MAX_RETRIES + 1} attempts: {last_exc}"
