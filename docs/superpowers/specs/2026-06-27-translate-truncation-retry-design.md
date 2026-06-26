@@ -58,7 +58,15 @@ Both checks fire before `_translate_one_batch` returns. The RuntimeErrors raised
 
 ### Fix #2: retry helper `_translate_one_batch_with_retry`
 
-Add a new function that wraps `_translate_one_batch` with retry logic:
+**Step 1 — let API errors propagate unwrapped from `_translate_one_batch`.**
+
+The current `_translate_one_batch` catches `anthropic.AuthenticationError`, `anthropic.APIStatusError`, `anthropic.APIConnectionError` and re-raises each as a `RuntimeError`. For the retry wrapper to inspect the underlying exception type and `status_code`, those must propagate unwrapped. Change `_translate_one_batch`'s three `except` clauses to bare `raise` (preserving the `from exc` chain via implicit chaining).
+
+The retry helper (below) will be responsible for wrapping non-retryable API errors with the same user-facing messages the old code produced, after the retry decision is made.
+
+The truncation RuntimeErrors raised in Fix #1 are still raised as `RuntimeError` and are NOT caught by the retry wrapper (which only catches `anthropic.*`).
+
+**Step 2 — add `_translate_one_batch_with_retry`:**
 
 ```python
 import time
@@ -73,15 +81,24 @@ def _translate_one_batch_with_retry(
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
             return _translate_one_batch(segments, context_bundle, settings)
-        except (anthropic.APIConnectionError, anthropic.APIStatusError) as exc:
+        except anthropic.APIConnectionError as exc:
             last_exc = exc
-            # Retry only on network errors and retryable HTTP statuses.
-            status = getattr(exc, "status_code", None)
-            retryable = isinstance(exc, anthropic.APIConnectionError) or status in {429, 500, 502, 503, 504}
-            if not retryable or attempt == LLM_MAX_RETRIES:
+            # Always retryable; sleep or give up.
+            if attempt == LLM_MAX_RETRIES:
                 break
-            backoff = LLM_RETRY_BACKOFF_S * (LLM_RETRY_BACKOFF_FACTOR ** attempt)
-            time.sleep(backoff)
+            time.sleep(LLM_RETRY_BACKOFF_S * (LLM_RETRY_BACKOFF_FACTOR ** attempt))
+        except anthropic.APIStatusError as exc:
+            last_exc = exc
+            status = getattr(exc, "status_code", None)
+            if status not in {429, 500, 502, 503, 504}:
+                # Non-retryable: wrap with the same message the old code produced and re-raise.
+                if isinstance(exc, anthropic.AuthenticationError):
+                    raise RuntimeError(f"MiniMax authentication failed: {exc}") from exc
+                raise RuntimeError(f"MiniMax HTTP {status}: {exc.message}") from exc
+            if attempt == LLM_MAX_RETRIES:
+                break
+            time.sleep(LLM_RETRY_BACKOFF_S * (LLM_RETRY_BACKOFF_FACTOR ** attempt))
+
     raise RuntimeError(
         f"MiniMax batch failed after {LLM_MAX_RETRIES + 1} attempts: {last_exc}"
     ) from last_exc
@@ -91,10 +108,15 @@ def _translate_one_batch_with_retry(
 - `anthropic.APIConnectionError` — network blip
 - `anthropic.APIStatusError` with status in `{429, 500, 502, 503, 504}` — rate-limit or transient server error
 
-**Non-retryable errors** (propagate immediately, no retry):
-- `anthropic.APIStatusError` with other statuses (400, 401, 403, 404) — bad request / auth / not found
-- `anthropic.AuthenticationError` — config issue
-- `RuntimeError` from truncation detection (Fix #1) — structural
+**Non-retryable errors** (wrapped with user-facing message and re-raised, no retry):
+- `anthropic.AuthenticationError` (subclass of `APIStatusError`, status 401)
+- `anthropic.APIStatusError` with other 4xx statuses (400, 403, 404, etc.)
+- `RuntimeError` from truncation detection (Fix #1) — structural, not caught by retry wrapper
+
+**User-facing error message contract** (preserved from current code):
+- `anthropic.AuthenticationError` → `RuntimeError("MiniMax authentication failed: {exc}")`
+- `anthropic.APIStatusError` (non-retryable) → `RuntimeError("MiniMax HTTP {status_code}: {exc.message}")`
+- After max retries on retryable errors → `RuntimeError("MiniMax batch failed after {N} attempts: {last_exc}")`
 
 ### Caller change
 
@@ -112,15 +134,18 @@ The retry helper is the only one that imports `anthropic` indirectly via `_trans
 |---|---|---|
 | LLM hits `max_tokens` (JSON cut mid-string) | `RuntimeError("invalid JSON at char N")` — misleading | `RuntimeError("MiniMax hit max_tokens... Reduce LLM_BATCH_SIZE or increase max_tokens")` |
 | LLM hits `max_tokens` (JSON cut at array close, valid JSON, fewer items) | Silent: empty `text_vi` rows in CSV | `RuntimeError("returned M rows for batch of N segments; count mismatch")` |
-| `APIConnectionError` on batch N | Batch N fails, exception propagates, all prior batches discarded | Retry up to 3 times with 1s/2s/4s backoff; success or raise after 4 total attempts |
-| HTTP 429 on batch N | Same as above | Retry up to 3 times with backoff |
-| HTTP 400/401/403/404 | Immediate failure | Immediate failure (no retry, same as before) |
+| LLM returns MORE rows than input (count mismatch in either direction) | Silently dropped by `export_review_csv`'s `by_id` dict | `RuntimeError("returned M rows for batch of N segments; count mismatch")` |
+| `APIConnectionError` on batch N | `RuntimeError("MiniMax network error: {exc}")`; all prior batches discarded | Retry up to 3 times with 1s/2s/4s backoff; success or `RuntimeError("MiniMax batch failed after 4 attempts: {exc}")` |
+| HTTP 429 on batch N | `RuntimeError("MiniMax HTTP 429: ...")`; all prior batches discarded | Retry up to 3 times with backoff; success or wrap with retry-exhausted message |
+| HTTP 500/502/503/504 on batch N | `RuntimeError("MiniMax HTTP {status}: ...")`; discarded | Retry up to 3 times with backoff |
+| HTTP 400/403/404 | `RuntimeError("MiniMax HTTP {status}: ...")`; discarded | Same message, no retry (preserved) |
+| `AuthenticationError` (status 401) | `RuntimeError("MiniMax authentication failed: {exc}")` | Same message, no retry (preserved) |
 | Truncation after 4 retries | n/a | Same as single attempt — truncation is not retried |
 | All batches succeed | Success | Success (no behavior change on happy path) |
 
 ## Test plan
 
-Add four tests to `tests/test_translate_responses.py` (consistent with existing LLM-call tests there):
+Add five tests to `tests/test_translate_responses.py` (consistent with existing LLM-call tests there):
 
 1. **`test_translate_one_batch_detects_max_tokens_truncation`**
    - Mock `_FakeAnthropic` to return a response with `stop_reason="max_tokens"` (valid JSON, full row count).
@@ -132,16 +157,21 @@ Add four tests to `tests/test_translate_responses.py` (consistent with existing 
    - Assert: `RuntimeError` raised; message contains `"2"` and `"3"`; message contains `"count mismatch"`.
 
 3. **`test_translate_one_batch_with_retry_recovers_from_transient_connection_error`**
-   - Mock to raise `anthropic.APIConnectionError` on the first 2 calls, succeed on the 3rd.
+   - Mock `client.messages.create` to raise `anthropic.APIConnectionError` on the first 2 calls, succeed on the 3rd.
    - Call `_translate_one_batch_with_retry`.
    - Assert: returns rows; mock called 3 times; `time.sleep` called 2 times with delays matching `1.0` and `2.0` (use `monkeypatch.setattr(time, "sleep", ...)` to capture without sleeping).
 
 4. **`test_translate_one_batch_with_retry_gives_up_after_max_attempts`**
-   - Mock to always raise `anthropic.APIConnectionError`.
+   - Mock `client.messages.create` to always raise `anthropic.APIConnectionError`.
    - Call `_translate_one_batch_with_retry`.
-   - Assert: `RuntimeError` raised; message contains `"4 attempts"` (1 initial + 3 retries) or `"after 3 retries"`; underlying exception chained via `from`.
+   - Assert: `RuntimeError` raised; message contains `"4 attempts"` (1 initial + 3 retries); underlying exception chained via `from`.
 
-Existing tests in `tests/test_translate_responses.py` use single-segment inputs that don't trigger truncation or retry paths — they continue to pass unchanged.
+5. **`test_translate_one_batch_with_retry_does_not_retry_non_retryable_status`**
+   - Mock `client.messages.create` to raise `anthropic.APIStatusError` with status 401 (use the SDK's constructor or a stub) on every call.
+   - Call `_translate_one_batch_with_retry`.
+   - Assert: `RuntimeError` raised; message contains `"authentication failed"` (the preserved user-facing message); mock called exactly 1 time (no retry); `time.sleep` not called.
+
+Existing tests in `tests/test_translate_responses.py` use single-segment inputs that don't trigger truncation or retry paths — they continue to pass unchanged. The existing `_FakeAnthropic` infrastructure (already in the file) needs to support raising `anthropic.APIConnectionError` and `anthropic.APIStatusError` for tests 3–5; extend it minimally if needed.
 
 ## Risk
 
@@ -156,6 +186,7 @@ Three-file change (one source file, one test file, one design doc revert). Rever
 - `import time` goes at the top of `translate.py` with the other stdlib imports.
 - `import anthropic` stays inside `_translate_one_batch` (preserves existing pattern + works with `monkeypatch.setitem(sys.modules, ...)` in tests).
 - `last_exc: Exception | None` requires `from __future__ import annotations` (already present at line 1).
+- The three `except anthropic.*` clauses in `_translate_one_batch` change from `raise RuntimeError(...) from exc` to bare `raise`. The retry helper now owns the wrapping for non-retryable errors.
 - Retry config is hardcoded constants, not in `Settings` — YAGNI. If operators later need to tune, move to `Settings.llm_max_retries` etc.
 - No new module dependencies.
 - No changes to `export_review_csv` or `parse_translation_response`.
