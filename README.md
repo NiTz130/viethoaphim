@@ -8,10 +8,10 @@ VietDub là CLI ưu tiên Windows để tạo bản lồng tiếng tiếng Việ
 - STT tiếng Trung bằng `faster-whisper`.
 - OCR phụ đề cứng bằng PaddleOCR trên vùng dưới khung hình.
 - Trộn kết quả STT/OCR thành transcript theo mốc thời gian.
-- Gọi OpenAI-compatible LLM để dịch sang tiếng Việt.
+- Gọi MiniMax M3 (Anthropic-compatible) LLM để dịch sang tiếng Việt.
 - Xuất `review.csv` UTF-8 BOM để mở bằng Excel.
 - Resume từ bước TTS sau khi sửa bản dịch.
-- Tạo MP3 từng câu bằng Edge TTS, ghép thành `final_vi.wav`.
+- Tạo MP3 từng câu bằng MiniMax Speech 2.8, ghép thành `final_vi.wav`.
 - Render `subtitles_vi.srt` và mux video preview `preview_vi.mp4`.
 - Tái sử dụng dữ liệu từ điển trong `data/` và bộ nhớ từ các job cũ trong `jobs/`.
 
@@ -20,8 +20,8 @@ VietDub là CLI ưu tiên Windows để tạo bản lồng tiếng tiếng Việ
 - Windows PowerShell.
 - Python 3.11 trở lên.
 - FFmpeg và FFprobe có trong `PATH`.
-- Internet để gọi LLM, Edge TTS và tải model OCR/STT lần đầu.
-- OpenAI API key hoặc endpoint OpenAI-compatible.
+- Internet để gọi MiniMax LLM/TTS và tải model OCR/STT lần đầu.
+- MiniMax API key từ platform.minimax.io.
 
 Kiểm tra nhanh:
 
@@ -46,20 +46,29 @@ Nếu PaddleOCR hoặc faster-whisper cần tải model lần đầu, lần ch�
 
 Có thể set biến môi trường trực tiếp trong PowerShell hoặc tạo file `.env` ở thư mục gốc repo. `.env` không được commit.
 
-Tối thiểu:
+Tối thiểu (LLM + TTS đều dùng MiniMax — lấy API key tại `https://platform.minimax.io`):
 
 ```powershell
-$env:OPENAI_API_KEY="your-key"
-$env:LLM_MODEL="gpt-4.1-mini"
+$env:ANTHROPIC_API_KEY="sk-..."
+$env:LLM_MODEL="MiniMax-M3"
+$env:ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
+$env:TTS_VOICE_ID="vi-female-1"
 ```
 
 Ví dụ `.env`:
 
 ```dotenv
-OPENAI_API_KEY=your-key
-LLM_MODEL=gpt-4.1-mini
-OPENAI_BASE_URL=
-EDGE_VOICE=vi-VN-HoaiMyNeural
+# MiniMax (LLM + TTS) — get an API key from https://platform.minimax.io
+ANTHROPIC_API_KEY=sk-...
+LLM_MODEL=MiniMax-M3
+ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
+
+# MiniMax TTS — pick a voice_id from https://platform.minimax.io/faq/system-voice-id
+TTS_API_KEY=sk-...                  # can be the same as ANTHROPIC_API_KEY
+TTS_VOICE_ID=vi-female-1
+TTS_MODEL=speech-2.8-hd
+TTS_BASE_URL=https://api.minimax.io/v1/t2a_v2
+
 STT_MODEL=medium
 STT_LANGUAGE=zh
 JOBS_DIR=jobs
@@ -69,8 +78,9 @@ SAMPLE_RATE=44100
 
 Ghi chú:
 
-- `OPENAI_API_KEY` và `LLM_MODEL` bắt buộc cho bước dịch.
-- `OPENAI_BASE_URL` để trống nếu dùng OpenAI mặc định. Nếu endpoint kết thúc bằng `/responses`, VietDub sẽ gọi Responses API; các endpoint khác dùng Chat Completions.
+- `ANTHROPIC_API_KEY` (hoặc `TTS_API_KEY` riêng) và `LLM_MODEL` bắt buộc cho bước dịch. `TTS_VOICE_ID` bắt buộc cho bước TTS — không dùng được tên voice edge_tts cũ như `vi-VN-HoaiMyNeural`. Tra cứu voice hợp lệ tại `https://platform.minimax.io/faq/system-voice-id`.
+- `TTS_VOICE_ID` mặc định trong `Settings` (`vi-VN-HoaiMyNeural`) là tên voice edge_tts cũ và sẽ fail ở lần gọi TTS đầu tiên. Phải set sang `voice_id` MiniMax hợp lệ trước khi chạy TTS.
+- LLM và TTS của MiniMax đều tính phí (LLM theo token, TTS theo ký tự) — khác với edge_tts trước đây miễn phí.
 - `REFERENCE_DATA_DIR` mặc định là `data`. Tool tự động tìm thư mục con có `Dictionaries.config`.
 
 ## Workflow Review
