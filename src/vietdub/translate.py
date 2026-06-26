@@ -93,6 +93,7 @@ def build_translation_prompt(segments: list[TimedSegment], context_bundle: dict)
 
 
 LLM_BATCH_SIZE = 50
+LLM_MAX_TOKENS = 8192
 LLM_MAX_RETRIES = 3
 LLM_RETRY_BACKOFF_S = 1.0
 LLM_RETRY_BACKOFF_FACTOR = 2.0
@@ -141,7 +142,7 @@ def _translate_one_batch(
     try:
         response = client.messages.create(
             model=settings.llm_model,
-            max_tokens=8192,
+            max_tokens=LLM_MAX_TOKENS,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
@@ -161,7 +162,7 @@ def _translate_one_batch(
 
     if getattr(response, "stop_reason", None) == "max_tokens":
         raise RuntimeError(
-            f"MiniMax hit max_tokens (8192) for batch of {len(segments)} segments "
+            f"MiniMax hit max_tokens ({LLM_MAX_TOKENS}) for batch of {len(segments)} segments "
             f"(translated {len(rows)}). Reduce LLM_BATCH_SIZE or increase max_tokens."
         )
     if len(rows) != len(segments):
@@ -180,14 +181,13 @@ def _translate_one_batch_with_retry(
 ) -> list[TranslationRow]:
     """Call _translate_one_batch with exponential-backoff retry on transient errors.
 
-    This helper handles both exception shapes from `_translate_one_batch`:
-    the current shape (API errors wrapped as `RuntimeError` with the original
-    `anthropic.*` exception preserved as `__cause__`) and the future shape
-    (bare `anthropic.*` exceptions raised directly). Retries on transient
-    errors (connection failures and 429/5xx status codes) with exponential
-    backoff; wraps non-retryable failures and final exhausted retries as
-    `RuntimeError`. The `anthropic` module is resolved via `sys.modules` so
-    test mocks that omit exception classes degrade gracefully to a pass-through.
+    Catches bare `anthropic.*` exceptions (raised unwrapped from
+    `_translate_one_batch`) and retries on transient failures (network errors,
+    HTTP 429, 5xx). Non-retryable API errors are wrapped with user-facing
+    messages. Truncation and other structural `RuntimeError`s raised by
+    `_translate_one_batch` propagate unchanged — they are not caught here.
+    The `anthropic` module is resolved via `sys.modules` so test mocks that
+    omit exception classes degrade gracefully to a pass-through.
     """
     anthropic_mod = sys.modules.get("anthropic")
     if anthropic_mod is None:
@@ -200,44 +200,16 @@ def _translate_one_batch_with_retry(
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
             return _translate_one_batch(segments, context_bundle, settings)
-        except RuntimeError as exc:
-            # Current path: _translate_one_batch wraps API errors as RuntimeError.
-            # Unwrap the cause and apply the same retry logic as if the underlying
-            # anthropic.* exception had been raised directly. Preserve the
-            # inner RuntimeError message (do not re-wrap).
-            cause = exc.__cause__ if exc.__cause__ is not None else exc
-            if authentication_error and isinstance(cause, authentication_error):
-                raise
-            if api_connection_error and isinstance(cause, api_connection_error):
-                last_exc = cause
-                if attempt == LLM_MAX_RETRIES:
-                    break
-                time.sleep(LLM_RETRY_BACKOFF_S * (LLM_RETRY_BACKOFF_FACTOR ** attempt))
-                continue
-            if api_status_error and isinstance(cause, api_status_error):
-                last_exc = cause
-                status = getattr(cause, "status_code", None)
-                if status not in {429, 500, 502, 503, 504}:
-                    raise
-                if attempt == LLM_MAX_RETRIES:
-                    break
-                time.sleep(LLM_RETRY_BACKOFF_S * (LLM_RETRY_BACKOFF_FACTOR ** attempt))
-                continue
-            # Non-API RuntimeError (e.g. empty response, parse error): don't retry.
-            raise
         except api_connection_error as exc:
-            # Future path: _translate_one_batch raises bare anthropic.APIConnectionError.
             last_exc = exc
             if attempt == LLM_MAX_RETRIES:
                 break
             time.sleep(LLM_RETRY_BACKOFF_S * (LLM_RETRY_BACKOFF_FACTOR ** attempt))
         except api_status_error as exc:
-            # Future path: _translate_one_batch raises bare anthropic.APIStatusError
-            # (or its AuthenticationError subclass).
             last_exc = exc
             status = getattr(exc, "status_code", None)
             if status not in {429, 500, 502, 503, 504}:
-                if authentication_error and isinstance(exc, authentication_error):
+                if isinstance(exc, authentication_error):
                     raise RuntimeError(f"MiniMax authentication failed: {exc}") from exc
                 raise RuntimeError(f"MiniMax HTTP {status}: {exc.message}") from exc
             if attempt == LLM_MAX_RETRIES:

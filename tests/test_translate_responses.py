@@ -32,7 +32,8 @@ class _FakeMessages:
                     "context_note": "",
                     "status": "translated",
                 }]
-            }))]
+            }))],
+            stop_reason="end_turn",
         )
 
 
@@ -275,8 +276,11 @@ def test_translate_one_batch_with_retry_gives_up_after_max_attempts(monkeypatch)
     class _ConnError(Exception):
         pass
 
+    call_count = [0]
+
     class _AlwaysFailMessages:
         def create(self, **kwargs):
+            call_count[0] += 1
             raise _ConnError()
 
     class _AlwaysFailAnthropic:
@@ -302,6 +306,7 @@ def test_translate_one_batch_with_retry_gives_up_after_max_attempts(monkeypatch)
 
     assert exc_info.value.__cause__ is not None
     assert isinstance(exc_info.value.__cause__, _ConnError)
+    assert call_count[0] == 4
 
 
 def test_translate_one_batch_with_retry_does_not_retry_non_retryable_status(monkeypatch):
