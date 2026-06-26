@@ -68,7 +68,10 @@ def parse_translation_response(content: str) -> list[TranslationRow]:
         try:
             rows.append(TranslationRow.model_validate(item))
         except ValidationError as exc:
-            raise RuntimeError(f"Invalid LLM translation response: translation item {index} failed validation") from exc
+            raise RuntimeError(
+                f"Invalid LLM translation response: translation item {index} "
+                f"(segment_id={item.get('segment_id', '?')!r}) failed validation: {exc}"
+            ) from exc
     return rows
 
 
