@@ -194,6 +194,12 @@ def _probe_video_duration_ms(job: Job) -> int | None:
 
 
 def resume_tts_and_render(job: Job, settings) -> Path:
+    """Re-run TTS + render from a finalized ``review.csv``.
+
+    Validation runs before any stale render artifacts are removed, so a
+    bad edit in ``review.csv`` leaves the previous render in place for the
+    user to recover instead of silently destroying it.
+    """
     import asyncio
 
     from .media import mux_preview
@@ -206,6 +212,10 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     final_audio = job.root / "tts" / "final_vi.wav"
     sync_report_path = job.root / "tts" / "sync_report.json"
     preview = job.root / "output" / "preview_vi.mp4"
+
+    rows = import_review_csv(job.root / "translation" / "review.csv")
+    _validate_resume_segment_ids(job, rows)
+
     status = job.load_status()
     if StepName.RENDER.value in status:
         del status[StepName.RENDER.value]
@@ -214,9 +224,6 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     final_audio.unlink(missing_ok=True)
     sync_report_path.unlink(missing_ok=True)
     preview.unlink(missing_ok=True)
-
-    rows = import_review_csv(job.root / "translation" / "review.csv")
-    _validate_resume_segment_ids(job, rows)
     vietnamese_segments = [
         TimedSegment(
             id=row.segment_id,

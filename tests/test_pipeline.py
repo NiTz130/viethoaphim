@@ -423,7 +423,7 @@ def test_resume_tts_rejects_path_traversal_segment_id(monkeypatch, tmp_path):
     assert not (tmp_path / "evil.mp3").exists()
 
 
-def test_resume_tts_clears_stale_render_state_before_segment_validation(tmp_path):
+def test_resume_tts_preserves_render_state_when_segment_validation_fails(tmp_path):
     job_root = tmp_path / "job"
     review = job_root / "translation" / "review.csv"
     review.parent.mkdir(parents=True)
@@ -458,11 +458,11 @@ def test_resume_tts_clears_stale_render_state_before_segment_validation(tmp_path
         resume_tts_and_render(job, _resume_settings())
 
     status = json.loads((job_root / "status.json").read_text(encoding="utf-8"))
-    assert "render" not in status
-    assert not final_audio.exists()
-    assert not preview.exists()
-    assert not srt_path.exists()
-    assert not sync_report_path.exists()
+    assert "render" in status
+    assert final_audio.read_bytes() == b"old-final-audio"
+    assert preview.read_bytes() == b"old-preview"
+    assert srt_path.read_text(encoding="utf-8") == "old-subtitles"
+    assert json.loads(sync_report_path.read_text(encoding="utf-8")) == {"old": True}
 
 
 def test_resume_tts_rejects_unknown_transcript_segment_id(tmp_path):
