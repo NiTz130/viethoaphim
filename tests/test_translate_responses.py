@@ -91,6 +91,8 @@ def test_translate_with_llm_maps_authentication_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(
         Anthropic=_BoomAnthropic,
         AuthenticationError=_AuthError,
+        APIStatusError=_AuthError,
+        APIConnectionError=type("APIConnectionError", (Exception,), {}),
     ))
 
     with pytest.raises(RuntimeError, match="authentication failed"):

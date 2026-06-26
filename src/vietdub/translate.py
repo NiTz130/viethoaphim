@@ -145,12 +145,12 @@ def _translate_one_batch(
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
-    except anthropic.AuthenticationError as exc:
-        raise RuntimeError(f"MiniMax authentication failed: {exc}") from exc
-    except anthropic.APIStatusError as exc:
-        raise RuntimeError(f"MiniMax HTTP {exc.status_code}: {exc.message}") from exc
-    except anthropic.APIConnectionError as exc:
-        raise RuntimeError(f"MiniMax network error: {exc}") from exc
+    except anthropic.AuthenticationError:
+        raise
+    except anthropic.APIStatusError:
+        raise
+    except anthropic.APIConnectionError:
+        raise
 
     content_blocks = response.content or []
     text_parts = [getattr(block, "text", "") for block in content_blocks if getattr(block, "type", "") == "text"]
