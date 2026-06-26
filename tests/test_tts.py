@@ -1,4 +1,3 @@
-import json
 import json as json_module
 import sys
 import types
