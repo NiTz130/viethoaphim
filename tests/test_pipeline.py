@@ -10,7 +10,20 @@ from vietdub.srt import render_srt
 
 
 def _resume_settings():
-    return type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural", "sample_rate": 44_100})()
+    return type(
+        "Settings",
+        (),
+        {
+            "anthropic_api_key": "test-key",
+            "anthropic_base_url": "https://api.minimax.io/anthropic",
+            "llm_model": "MiniMax-M3",
+            "tts_voice_id": "vi-VN-HoaiMyNeural",
+            "tts_api_key": "test-tts-key",
+            "tts_base_url": "https://api.minimax.io/v1",
+            "tts_model": "speech-2.8-hd",
+            "sample_rate": 44_100,
+        },
+    )()
 
 
 def _write_valid_mp3(path, duration_ms: int = 400) -> None:
@@ -110,7 +123,7 @@ def test_resume_tts_and_render_writes_output_srt(monkeypatch, tmp_path):
         _write_valid_mp3(output, duration_ms=400)
         return output
 
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fake_synthesize_segment)
 
     srt_path = resume_tts_and_render(job, _resume_settings())
 
@@ -167,7 +180,7 @@ def test_resume_tts_and_render_allows_duplicate_inactive_segment_id(monkeypatch,
         _write_valid_mp3(output, duration_ms=400)
         return output
 
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fake_synthesize_segment)
 
     resume_tts_and_render(job, _resume_settings())
 
@@ -216,7 +229,7 @@ def test_resume_tts_and_render_rejects_missing_or_empty_preview_after_mux(monkey
 
     monkeypatch.setattr("vietdub.media.probe_media", fake_probe_media)
     monkeypatch.setattr("vietdub.media.mux_preview", fake_mux_preview)
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fake_synthesize_segment)
 
     with pytest.raises(RuntimeError, match="Preview was not created"):
         resume_tts_and_render(job, _resume_settings())
@@ -253,7 +266,7 @@ def test_resume_tts_and_render_keeps_srt_when_tts_segment_fails(monkeypatch, tmp
     async def fail_synthesize_segment(self, row, output):
         raise RuntimeError("tts failed")
 
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fail_synthesize_segment)
 
     try:
         resume_tts_and_render(job, _resume_settings())
@@ -294,7 +307,7 @@ def test_resume_tts_and_render_removes_stale_segment_audio_when_retry_fails(monk
         output.write_bytes(b"partial retry audio")
         raise RuntimeError("tts failed")
 
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fail_synthesize_segment)
 
     with pytest.raises(RuntimeError, match="No valid TTS segment audio"):
         resume_tts_and_render(job, _resume_settings())
@@ -338,7 +351,7 @@ def test_resume_tts_and_render_removes_stale_outputs_when_assembly_fails(monkeyp
     async def fail_synthesize_segment(self, row, output):
         raise RuntimeError("tts failed")
 
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fail_synthesize_segment)
 
     try:
         resume_tts_and_render(job, _resume_settings())
@@ -410,10 +423,19 @@ def test_resume_tts_rejects_path_traversal_segment_id(monkeypatch, tmp_path):
         output.write_bytes(b"mp3")
         return output
 
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fake_synthesize_segment)
 
     try:
-        resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+        resume_tts_and_render(job, type("Settings", (), {
+    "anthropic_api_key": "test-key",
+    "anthropic_base_url": "https://api.minimax.io/anthropic",
+    "llm_model": "MiniMax-M3",
+    "tts_voice_id": "vi-VN-HoaiMyNeural",
+    "tts_api_key": "test-tts-key",
+    "tts_base_url": "https://api.minimax.io/v1",
+    "tts_model": "speech-2.8-hd",
+    "sample_rate": 44_100,
+})())
     except RuntimeError as exc:
         assert "Invalid segment_id" in str(exc)
     else:
@@ -483,7 +505,16 @@ def test_resume_tts_rejects_unknown_transcript_segment_id(tmp_path):
     job = Job(root=job_root, config={})
 
     try:
-        resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+        resume_tts_and_render(job, type("Settings", (), {
+    "anthropic_api_key": "test-key",
+    "anthropic_base_url": "https://api.minimax.io/anthropic",
+    "llm_model": "MiniMax-M3",
+    "tts_voice_id": "vi-VN-HoaiMyNeural",
+    "tts_api_key": "test-tts-key",
+    "tts_base_url": "https://api.minimax.io/v1",
+    "tts_model": "speech-2.8-hd",
+    "sample_rate": 44_100,
+})())
     except RuntimeError as exc:
         assert "m-9999" in str(exc)
     else:
@@ -514,10 +545,19 @@ def test_resume_tts_rejects_transcript_path_traversal_segment_id(monkeypatch, tm
         called = True
         raise AssertionError("synthesis should not run for unsafe segment_id")
 
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fail_synthesize_segment)
 
     try:
-        resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+        resume_tts_and_render(job, type("Settings", (), {
+    "anthropic_api_key": "test-key",
+    "anthropic_base_url": "https://api.minimax.io/anthropic",
+    "llm_model": "MiniMax-M3",
+    "tts_voice_id": "vi-VN-HoaiMyNeural",
+    "tts_api_key": "test-tts-key",
+    "tts_base_url": "https://api.minimax.io/v1",
+    "tts_model": "speech-2.8-hd",
+    "sample_rate": 44_100,
+})())
     except RuntimeError as exc:
         assert "Invalid segment_id" in str(exc)
     else:
@@ -555,7 +595,7 @@ def test_resume_tts_rejects_duplicate_unsafe_segment_id_with_invalid_message(mon
         called = True
         raise AssertionError("synthesis should not run for unsafe segment_id")
 
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fail_synthesize_segment)
 
     with pytest.raises(RuntimeError) as exc_info:
         resume_tts_and_render(job, _resume_settings())
@@ -592,10 +632,19 @@ def test_resume_tts_rejects_transcript_windows_absolute_segment_id(monkeypatch, 
         called = True
         raise AssertionError("synthesis should not run for unsafe segment_id")
 
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fail_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fail_synthesize_segment)
 
     try:
-        resume_tts_and_render(job, type("Settings", (), {"edge_voice": "vi-VN-HoaiMyNeural"})())
+        resume_tts_and_render(job, type("Settings", (), {
+    "anthropic_api_key": "test-key",
+    "anthropic_base_url": "https://api.minimax.io/anthropic",
+    "llm_model": "MiniMax-M3",
+    "tts_voice_id": "vi-VN-HoaiMyNeural",
+    "tts_api_key": "test-tts-key",
+    "tts_base_url": "https://api.minimax.io/v1",
+    "tts_model": "speech-2.8-hd",
+    "sample_rate": 44_100,
+})())
     except RuntimeError as exc:
         assert "Invalid segment_id" in str(exc)
     else:
@@ -624,7 +673,7 @@ def test_resume_tts_clears_stale_warning_count_after_success(monkeypatch, tmp_pa
         _write_valid_mp3(output, duration_ms=400)
         return output
 
-    monkeypatch.setattr("vietdub.tts.EdgeTtsEngine.synthesize_segment", fake_synthesize_segment)
+    monkeypatch.setattr("vietdub.tts.MiniMaxTtsEngine.synthesize_segment", fake_synthesize_segment)
 
     resume_tts_and_render(job, _resume_settings())
 
@@ -674,7 +723,7 @@ def test_review_pipeline_writes_selected_system_memory(monkeypatch, tmp_path):
                 )
             ]
 
-    def fake_translate(segments, context_bundle, api_key, model, base_url):
+    def fake_translate(segments, context_bundle, *, settings):
         captured_context.update(context_bundle)
         return [
             type(
@@ -769,7 +818,7 @@ def test_review_pipeline_persists_artifacts_before_translate_failure(monkeypatch
         def recognize(self, video_path):
             return [TimedSegment(id="o-0001", start_ms=0, end_ms=1000, text="\u4f60\u597d", source="ocr")]
 
-    def fail_translate(segments, context_bundle, api_key, model, base_url):
+    def fail_translate(segments, context_bundle, *, settings):
         raise RuntimeError("translation failed")
 
     monkeypatch.setattr("vietdub.media.extract_audio", fake_extract_audio)

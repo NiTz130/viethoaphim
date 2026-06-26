@@ -100,9 +100,7 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     translations = translate_with_llm(
         merged,
         context_bundle,
-        typed_settings.openai_api_key,
-        typed_settings.llm_model,
-        typed_settings.openai_base_url,
+        settings=typed_settings,
     )
     job.write_json("translation/translated.json", [row.model_dump() for row in translations])
     export_review_csv(job.root / "translation" / "review.csv", merged, translations)
@@ -206,7 +204,7 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     from .srt import render_srt
     from .sync import assemble_final_audio
     from .translate import import_review_csv
-    from .tts import EdgeTtsEngine
+    from .tts import MiniMaxTtsEngine
 
     srt_path = job.root / "output" / "subtitles_vi.srt"
     final_audio = job.root / "tts" / "final_vi.wav"
@@ -240,7 +238,12 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     srt_path.write_text(render_srt(vietnamese_segments), encoding="utf-8")
 
     async def synthesize_all() -> int:
-        engine = EdgeTtsEngine(settings.edge_voice)
+        engine = MiniMaxTtsEngine(
+            voice_id=settings.tts_voice_id,
+            api_key=settings.tts_api_key,
+            base_url=settings.tts_base_url,
+            model=settings.tts_model,
+        )
         warnings: list[dict[str, str]] = []
         warning_path = job.root / "tts" / "tts_warnings.json"
         for row in rows:
