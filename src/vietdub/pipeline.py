@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import subprocess
 from pathlib import Path
 
 from .context import build_context_bundle
@@ -250,7 +251,7 @@ def resume_tts_and_render(job: Job, settings) -> Path:
             segment_audio.unlink(missing_ok=True)
             try:
                 await engine.synthesize_segment(row, segment_audio)
-            except Exception as exc:  # noqa: BLE001 - keep subtitle output even if one TTS request fails.
+            except Exception as exc:  # noqa: BLE001 - best-effort synthesis: any single-segment TTS failure must not abort the pipeline.
                 segment_audio.unlink(missing_ok=True)
                 warnings.append({"segment_id": row.segment_id, "error": str(exc)})
         if warnings:
@@ -272,7 +273,7 @@ def resume_tts_and_render(job: Job, settings) -> Path:
             video_duration_ms=_probe_video_duration_ms(job),
             sync_report_path=sync_report_path,
         )
-    except Exception:  # noqa: BLE001 - do not leave stale render artifacts after a failed resume.
+    except (OSError, RuntimeError, subprocess.SubprocessError):  # do not leave stale render artifacts after a failed resume.
         final_audio.unlink(missing_ok=True)
         preview.unlink(missing_ok=True)
         raise
@@ -284,7 +285,7 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     preview.unlink(missing_ok=True)
     try:
         mux_preview(job.input_video, final_audio, srt_path, preview)
-    except Exception:  # noqa: BLE001 - do not leave stale or partial previews after mux failure.
+    except (OSError, RuntimeError, subprocess.SubprocessError):  # do not leave stale or partial previews after mux failure.
         preview.unlink(missing_ok=True)
         raise
     if not preview.exists() or preview.stat().st_size == 0:

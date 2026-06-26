@@ -6,6 +6,7 @@ import wave
 from collections.abc import Iterable
 from pathlib import Path
 
+import pydub.exceptions
 from pydub import AudioSegment
 
 from .models import SyncReport, SyncSegmentReport, TranslationRow
@@ -148,7 +149,7 @@ def assemble_final_audio(
                 synced_duration_ms = len(fitted_segment)
                 timeline = timeline.overlay(fitted_segment, position=max(0, row.start_ms))
                 valid_segments += 1
-            except Exception as exc:  # noqa: BLE001 - continue with other synthesized segments.
+            except (OSError, pydub.exceptions.CouldntDecodeError, subprocess.SubprocessError) as exc:
                 warnings.append(f"unreadable TTS audio: {exc}")
 
         report.segments.append(
