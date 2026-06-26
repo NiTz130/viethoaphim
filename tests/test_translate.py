@@ -125,25 +125,59 @@ def test_parse_translation_response_warns_and_coerces_invalid_status(capsys):
     assert "m-0001" in captured.err
 
 
+def _valid_translations_payload():
+    return {
+        "translations": [
+            {
+                "segment_id": "m-0001",
+                "start_ms": 0,
+                "end_ms": 1000,
+                "speaker": None,
+                "text_cn": "你好",
+                "text_vi": "Xin chào",
+                "context_note": "",
+                "status": "draft",
+            }
+        ]
+    }
+
+
 def test_parse_translation_response_strips_markdown_fences():
     """LLMs (notably MiniMax M3) sometimes wrap JSON in ```json ... ``` fences."""
-    payload = json.dumps(
-        {
-            "translations": [
-                {
-                    "segment_id": "m-0001",
-                    "start_ms": 0,
-                    "end_ms": 1000,
-                    "speaker": None,
-                    "text_cn": "你好",
-                    "text_vi": "Xin chào",
-                    "context_note": "",
-                    "status": "draft",
-                }
-            ]
-        }
-    )
+    payload = json.dumps(_valid_translations_payload())
     fenced = "```json\n" + payload + "\n```"
+
+    rows = parse_translation_response(fenced)
+
+    assert len(rows) == 1
+    assert rows[0].segment_id == "m-0001"
+
+
+def test_parse_translation_response_handles_single_line_fence():
+    payload = json.dumps(_valid_translations_payload())
+    # No newline between ```json and {
+    fenced = "```json " + payload + "\n```"
+
+    rows = parse_translation_response(fenced)
+
+    assert len(rows) == 1
+    assert rows[0].segment_id == "m-0001"
+
+
+def test_parse_translation_response_handles_trailing_only_fence():
+    payload = json.dumps(_valid_translations_payload())
+    # No opening fence, only trailing ```
+    fenced = payload + "\n```"
+
+    rows = parse_translation_response(fenced)
+
+    assert len(rows) == 1
+    assert rows[0].segment_id == "m-0001"
+
+
+def test_parse_translation_response_handles_crlf_fences():
+    payload = json.dumps(_valid_translations_payload())
+    fenced = "```json\r\n" + payload + "\r\n```\r\n"
 
     rows = parse_translation_response(fenced)
 

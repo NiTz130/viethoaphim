@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 import sys
 import time
 from json import JSONDecodeError
@@ -26,15 +27,18 @@ CSV_FIELDS = [
 ALLOWED_REVIEW_STATUSES = {"draft", "reviewed", "skip"}
 
 
+_LEADING_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?")
+_TRAILING_FENCE_RE = re.compile(r"\n?```$")
+
+
 def _strip_markdown_fences(content: str) -> str:
-    """Strip leading/trailing markdown code fences (e.g. ```json\\n...\\n```)."""
-    stripped = content.strip()
-    if stripped.startswith("```"):
-        first_newline = stripped.find("\n")
-        if first_newline != -1:
-            stripped = stripped[first_newline + 1:]
-        if stripped.endswith("```"):
-            stripped = stripped[: stripped.rfind("```")]
+    """Strip leading/trailing markdown code fences (e.g. ```json\\n...\\n```).
+
+    Handles standard (```json\\n...\\n```), single-line opening (```json {...}```),
+    trailing-only (\\n```), and CRLF line endings.
+    """
+    stripped = _LEADING_FENCE_RE.sub("", content.strip(), count=1)
+    stripped = _TRAILING_FENCE_RE.sub("", stripped, count=1)
     return stripped.strip()
 
 
