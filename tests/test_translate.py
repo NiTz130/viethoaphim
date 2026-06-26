@@ -125,6 +125,32 @@ def test_parse_translation_response_warns_and_coerces_invalid_status(capsys):
     assert "m-0001" in captured.err
 
 
+def test_parse_translation_response_strips_markdown_fences():
+    """LLMs (notably MiniMax M3) sometimes wrap JSON in ```json ... ``` fences."""
+    payload = json.dumps(
+        {
+            "translations": [
+                {
+                    "segment_id": "m-0001",
+                    "start_ms": 0,
+                    "end_ms": 1000,
+                    "speaker": None,
+                    "text_cn": "你好",
+                    "text_vi": "Xin chào",
+                    "context_note": "",
+                    "status": "draft",
+                }
+            ]
+        }
+    )
+    fenced = "```json\n" + payload + "\n```"
+
+    rows = parse_translation_response(fenced)
+
+    assert len(rows) == 1
+    assert rows[0].segment_id == "m-0001"
+
+
 def test_import_review_csv_rejects_missing_columns(tmp_path):
     path = tmp_path / "review.csv"
     path.write_text("segment_id,start_ms,end_ms,text_cn,text_vi\nm-0001,0,1000,\u4f60\u597d,Xin chao\n", encoding="utf-8-sig")

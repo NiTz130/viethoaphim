@@ -25,11 +25,27 @@ CSV_FIELDS = [
 ALLOWED_REVIEW_STATUSES = {"draft", "reviewed", "skip"}
 
 
+def _strip_markdown_fences(content: str) -> str:
+    """Strip leading/trailing markdown code fences (e.g. ```json\\n...\\n```)."""
+    stripped = content.strip()
+    if stripped.startswith("```"):
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1:]
+        if stripped.endswith("```"):
+            stripped = stripped[: stripped.rfind("```")]
+    return stripped.strip()
+
+
 def parse_translation_response(content: str) -> list[TranslationRow]:
     try:
         data = json.loads(content)
-    except JSONDecodeError as exc:
-        raise RuntimeError(f"Invalid LLM translation response: invalid JSON at char {exc.pos}") from exc
+    except JSONDecodeError:
+        # Retry after stripping markdown code fences (LLMs sometimes wrap JSON in ```json ... ```)
+        try:
+            data = json.loads(_strip_markdown_fences(content))
+        except JSONDecodeError as exc:
+            raise RuntimeError(f"Invalid LLM translation response: invalid JSON at char {exc.pos}") from exc
 
     if not isinstance(data, dict):
         raise RuntimeError("Invalid LLM translation response: expected a JSON object")
