@@ -340,3 +340,131 @@ def test_translate_one_batch_with_retry_does_not_retry_non_retryable_status(monk
     assert sleep_calls == []
 
 
+def test_translate_one_batch_detects_max_tokens_truncation(monkeypatch):
+    class _TruncatedMessages:
+        def create(self, **kwargs):
+            return types.SimpleNamespace(
+                content=[_TextBlock(json.dumps({
+                    "translations": [
+                        {
+                            "segment_id": "m-0001",
+                            "start_ms": 0,
+                            "end_ms": 1000,
+                            "speaker": None,
+                            "text_cn": "你好",
+                            "text_vi": "Xin chào",
+                            "context_note": "",
+                            "status": "draft",
+                        },
+                        {
+                            "segment_id": "m-0002",
+                            "start_ms": 1000,
+                            "end_ms": 2000,
+                            "speaker": None,
+                            "text_cn": "世界",
+                            "text_vi": "Thế giới",
+                            "context_note": "",
+                            "status": "draft",
+                        },
+                        {
+                            "segment_id": "m-0003",
+                            "start_ms": 2000,
+                            "end_ms": 3000,
+                            "speaker": None,
+                            "text_cn": "朋友",
+                            "text_vi": "Bạn bè",
+                            "context_note": "",
+                            "status": "draft",
+                        },
+                    ]
+                }))],
+                stop_reason="max_tokens",
+            )
+
+    class _TruncatedAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = _TruncatedMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(
+        Anthropic=_TruncatedAnthropic,
+        AuthenticationError=type("AuthenticationError", (Exception,), {}),
+        APIStatusError=type("APIStatusError", (Exception,), {"status_code": 500, "message": ""}),
+        APIConnectionError=type("APIConnectionError", (Exception,), {}),
+    ))
+
+    from vietdub.translate import _translate_one_batch
+    with pytest.raises(RuntimeError, match="max_tokens") as exc_info:
+        _translate_one_batch(
+            segments=[
+                TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="你好"),
+                TimedSegment(id="m-0002", start_ms=1000, end_ms=2000, text="世界"),
+                TimedSegment(id="m-0003", start_ms=2000, end_ms=3000, text="朋友"),
+            ],
+            context_bundle={},
+            settings=_settings(),
+        )
+
+    msg = str(exc_info.value)
+    assert "3" in msg
+    assert "Reduce LLM_BATCH_SIZE" in msg
+
+
+def test_translate_one_batch_detects_row_count_mismatch(monkeypatch):
+    class _ShortMessages:
+        def create(self, **kwargs):
+            return types.SimpleNamespace(
+                content=[_TextBlock(json.dumps({
+                    "translations": [
+                        {
+                            "segment_id": "m-0001",
+                            "start_ms": 0,
+                            "end_ms": 1000,
+                            "speaker": None,
+                            "text_cn": "你好",
+                            "text_vi": "Xin chào",
+                            "context_note": "",
+                            "status": "draft",
+                        },
+                        {
+                            "segment_id": "m-0002",
+                            "start_ms": 1000,
+                            "end_ms": 2000,
+                            "speaker": None,
+                            "text_cn": "世界",
+                            "text_vi": "Thế giới",
+                            "context_note": "",
+                            "status": "draft",
+                        },
+                    ]
+                }))],
+                stop_reason="end_turn",
+            )
+
+    class _ShortAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = _ShortMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(
+        Anthropic=_ShortAnthropic,
+        AuthenticationError=type("AuthenticationError", (Exception,), {}),
+        APIStatusError=type("APIStatusError", (Exception,), {"status_code": 500, "message": ""}),
+        APIConnectionError=type("APIConnectionError", (Exception,), {}),
+    ))
+
+    from vietdub.translate import _translate_one_batch
+    with pytest.raises(RuntimeError, match="count mismatch") as exc_info:
+        _translate_one_batch(
+            segments=[
+                TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="你好"),
+                TimedSegment(id="m-0002", start_ms=1000, end_ms=2000, text="世界"),
+                TimedSegment(id="m-0003", start_ms=2000, end_ms=3000, text="朋友"),
+            ],
+            context_bundle={},
+            settings=_settings(),
+        )
+
+    msg = str(exc_info.value)
+    assert "2" in msg
+    assert "3" in msg
+
+

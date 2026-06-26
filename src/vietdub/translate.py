@@ -157,7 +157,20 @@ def _translate_one_batch(
     if not text_parts:
         raise RuntimeError("MiniMax returned empty response (no text content blocks)")
     content = "".join(text_parts)
-    return parse_translation_response(content)
+    rows = parse_translation_response(content)
+
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        raise RuntimeError(
+            f"MiniMax hit max_tokens (8192) for batch of {len(segments)} segments "
+            f"(translated {len(rows)}). Reduce LLM_BATCH_SIZE or increase max_tokens."
+        )
+    if len(rows) != len(segments):
+        raise RuntimeError(
+            f"MiniMax returned {len(rows)} rows for batch of {len(segments)} segments; "
+            f"count mismatch (likely truncation). Reduce LLM_BATCH_SIZE."
+        )
+
+    return rows
 
 
 def _translate_one_batch_with_retry(
