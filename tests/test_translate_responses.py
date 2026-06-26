@@ -473,3 +473,45 @@ def test_translate_one_batch_detects_row_count_mismatch(monkeypatch):
     assert "3" in msg
 
 
+def test_translate_with_llm_raises_when_llm_max_tokens_exceeds_model_cap(monkeypatch):
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_FakeAnthropic))
+
+    with pytest.raises(RuntimeError, match="exceeds known output cap") as exc_info:
+        translate_with_llm(
+            segments=[TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="x")],
+            context_bundle={},
+            settings=_settings(llm_model="claude-3-haiku-20240307"),
+        )
+
+    msg = str(exc_info.value)
+    assert "4096" in msg
+    assert "8192" in msg
+
+
+def test_translate_with_llm_passes_when_model_cap_sufficient(monkeypatch):
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_FakeAnthropic))
+
+    rows = translate_with_llm(
+        segments=[TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="x")],
+        context_bundle={},
+        settings=_settings(llm_model="claude-3-5-sonnet-20240620"),
+    )
+
+    assert len(rows) == 1
+
+
+def test_translate_with_llm_warns_for_unknown_model(monkeypatch, capsys):
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_FakeAnthropic))
+
+    rows = translate_with_llm(
+        segments=[TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="x")],
+        context_bundle={},
+        settings=_settings(llm_model="some-future-model-xyz"),
+    )
+
+    assert len(rows) == 1
+    captured = capsys.readouterr()
+    assert "some-future-model-xyz" in captured.err
+    assert "KNOWN_MODEL_OUTPUT_CAPS" in captured.err
+
+

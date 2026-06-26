@@ -108,6 +108,13 @@ LLM_MAX_RETRIES = 3
 LLM_RETRY_BACKOFF_S = 1.0
 LLM_RETRY_BACKOFF_FACTOR = 2.0
 
+KNOWN_MODEL_OUTPUT_CAPS: dict[str, int] = {
+    "MiniMax-M3": 8192,
+    "claude-3-haiku-20240307": 4096,
+    "claude-3-5-sonnet-20240620": 8192,
+    "claude-3-opus-20240229": 4096,
+}
+
 
 def translate_with_llm(
     segments: list[TimedSegment],
@@ -124,6 +131,21 @@ def translate_with_llm(
         raise RuntimeError("ANTHROPIC_API_KEY is required for translation")
     if not settings.llm_model:
         raise RuntimeError("LLM_MODEL is required for translation")
+
+    cap = KNOWN_MODEL_OUTPUT_CAPS.get(settings.llm_model)
+    if cap is not None and LLM_MAX_TOKENS > cap:
+        raise RuntimeError(
+            f"LLM_MAX_TOKENS ({LLM_MAX_TOKENS}) exceeds known output cap "
+            f"({cap}) for model {settings.llm_model!r}. "
+            f"Reduce LLM_MAX_TOKENS or use a different model."
+        )
+    if cap is None:
+        print(
+            f"Warning: model {settings.llm_model!r} not in KNOWN_MODEL_OUTPUT_CAPS; "
+            f"skipping output cap validation. If you hit truncation, "
+            f"add the model's output cap to the dict.",
+            file=sys.stderr,
+        )
 
     all_rows: list[TranslationRow] = []
     for start in range(0, len(segments), LLM_BATCH_SIZE):
