@@ -240,7 +240,7 @@ def resume_tts_and_render(job: Job, settings) -> Path:
     async def synthesize_all() -> int:
         engine = MiniMaxTtsEngine(
             voice_id=settings.tts_voice_id,
-            api_key=settings.tts_api_key,
+            api_key=settings.tts_api_key or settings.anthropic_api_key,
             base_url=settings.tts_base_url,
             model=settings.tts_model,
         )
