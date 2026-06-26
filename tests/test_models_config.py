@@ -21,11 +21,11 @@ def test_millis_to_srt_time_formats_zero_padded_components():
 
 
 def test_settings_defaults_without_api_key(monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
     monkeypatch.delenv("LLM_MODEL", raising=False)
     settings = Settings(_env_file=None)
-    assert settings.openai_base_url == ""
-    assert settings.llm_model == ""
-    assert settings.edge_voice == "vi-VN-HoaiMyNeural"
+    assert settings.anthropic_base_url == "https://api.minimax.io/anthropic"
+    assert settings.llm_model == "MiniMax-M3"
+    assert settings.tts_voice_id == "vi-VN-HoaiMyNeural"
     assert settings.reference_data_dir == "data"
