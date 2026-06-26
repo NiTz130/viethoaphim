@@ -1,5 +1,5 @@
 from vietdub.config import Settings
-from vietdub.models import TimedSegment, millis_to_srt_time, srt_time_to_millis
+from vietdub.models import TimedSegment, millis_to_srt_time
 
 
 def test_timed_segment_computes_duration():
@@ -16,9 +16,8 @@ def test_timed_segment_rejects_negative_duration():
         raise AssertionError("expected validation error")
 
 
-def test_srt_time_round_trip():
+def test_millis_to_srt_time_formats_zero_padded_components():
     assert millis_to_srt_time(3_723_456) == "01:02:03,456"
-    assert srt_time_to_millis("01:02:03,456") == 3_723_456
 
 
 def test_settings_defaults_without_api_key(monkeypatch):

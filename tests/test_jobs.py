@@ -57,13 +57,3 @@ def test_mark_step_and_inspect(tmp_path):
 
     assert status["stt"]["state"] == "done"
     assert status["stt"]["details"] == {"segments": 2}
-
-
-def test_steps_from_returns_expected_order(tmp_path):
-    video = tmp_path / "clip.mp4"
-    video.write_bytes(b"fake-video")
-    job = JobManager(tmp_path / "jobs").create(video, series=None)
-
-    names = [step.value for step in job.steps_from(StepName.MERGE)]
-
-    assert names == ["merge", "context", "translate", "tts", "render"]

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .models import STEP_ORDER, StepName
+from .models import StepName
 
 
 JOB_DIRS = [
@@ -54,10 +54,6 @@ class Job:
             "details": details,
         }
         self.write_json("status.json", status)
-
-    def steps_from(self, step: StepName) -> list[StepName]:
-        start = STEP_ORDER.index(step)
-        return STEP_ORDER[start:]
 
 
 class JobManager:

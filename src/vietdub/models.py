@@ -54,22 +54,6 @@ class TimedSegment(BaseModel):
         return self.end_ms - self.start_ms
 
 
-class CharacterProfile(BaseModel):
-    name_cn: str
-    name_vi: str
-    role: str = ""
-    personality: str = ""
-    pronoun_rules: dict[str, str] = Field(default_factory=dict)
-    confidence: float = 0.0
-
-
-class SceneContext(BaseModel):
-    segment_ids: list[str]
-    summary: str
-    characters: list[str] = Field(default_factory=list)
-    tone: str = DEFAULT_TONE
-
-
 class TranslationRow(BaseModel):
     segment_id: str
     start_ms: int
@@ -110,14 +94,3 @@ def millis_to_srt_time(ms: int) -> str:
     minutes, remainder = divmod(remainder, 60_000)
     seconds, millis = divmod(remainder, 1_000)
     return f"{hours:02}:{minutes:02}:{seconds:02},{millis:03}"
-
-
-def srt_time_to_millis(value: str) -> int:
-    hours_text, minutes_text, rest = value.split(":")
-    seconds_text, millis_text = rest.split(",")
-    return (
-        int(hours_text) * 3_600_000
-        + int(minutes_text) * 60_000
-        + int(seconds_text) * 1_000
-        + int(millis_text)
-    )
