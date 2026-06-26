@@ -44,8 +44,8 @@ def wav_duration_ms(path: Path) -> int:
     return int(frames / rate * 1000)
 
 
-def run_ffmpeg(command: list[str]) -> None:
-    completed = subprocess.run(command, capture_output=True, text=True)
+def run_ffmpeg(command: list[str], timeout: float = 600.0) -> None:
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.strip() or completed.stdout.strip())
 
@@ -61,14 +61,15 @@ def trim_silence(input_path: Path, output_path: Path) -> None:
             "-af",
             "silenceremove=start_periods=1:start_threshold=-45dB:stop_periods=1:stop_threshold=-45dB",
             str(output_path),
-        ]
+        ],
+        timeout=60.0,
     )
 
 
 def stretch_audio(input_path: Path, output_path: Path, factor: float) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     filters = ",".join(atempo_filters(factor))
-    run_ffmpeg(["ffmpeg", "-y", "-i", str(input_path), "-filter:a", filters, str(output_path)])
+    run_ffmpeg(["ffmpeg", "-y", "-i", str(input_path), "-filter:a", filters, str(output_path)], timeout=60.0)
 
 
 def _active_translation_rows(rows: Iterable[TranslationRow]) -> list[TranslationRow]:

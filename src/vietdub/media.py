@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any
 
 
-def run_command(command: list[str]) -> None:
-    completed = subprocess.run(command, capture_output=True, text=True)
+def run_command(command: list[str], timeout: float = 600.0) -> None:
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.strip() or completed.stdout.strip())
 
@@ -32,7 +32,7 @@ def extract_audio(video: Path, output: Path, sample_rate: int) -> None:
     run_command(build_extract_audio_command(video, output, sample_rate))
 
 
-def probe_media(video: Path) -> dict[str, Any]:
+def probe_media(video: Path, timeout: float = 30.0) -> dict[str, Any]:
     command = [
         "ffprobe",
         "-v",
@@ -44,7 +44,7 @@ def probe_media(video: Path) -> dict[str, Any]:
         "json",
         str(video),
     ]
-    completed = subprocess.run(command, capture_output=True, text=True)
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.strip() or completed.stdout.strip())
     return json.loads(completed.stdout)

@@ -50,7 +50,7 @@ class PaddleSubtitleOcrEngine:
             f"fps={1 / self.sample_every_seconds},crop=iw:ih*0.28:0:ih*0.72",
             str(pattern),
         ]
-        completed = subprocess.run(command, capture_output=True, text=True)
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=600.0)
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr.strip() or completed.stdout.strip())
 

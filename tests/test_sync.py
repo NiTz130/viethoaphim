@@ -4,7 +4,7 @@ import pytest
 from pydub.generators import Sine
 
 from vietdub.models import TranslationRow
-from vietdub.sync import assemble_final_audio, atempo_filters, speed_factor_for_duration, wav_duration_ms
+from vietdub.sync import assemble_final_audio, atempo_filters, run_ffmpeg, speed_factor_for_duration, stretch_audio, trim_silence, wav_duration_ms
 
 
 def _row(segment_id: str, start_ms: int, end_ms: int, text_vi: str = "Xin chao", status: str = "reviewed") -> TranslationRow:
@@ -176,3 +176,62 @@ def test_assemble_final_audio_fails_when_no_valid_audio(tmp_path):
     saved = json.loads(report_path.read_text(encoding="utf-8"))
     assert saved["segments"][0]["segment_id"] == "m-0001"
     assert "missing TTS audio" in saved["segments"][0]["warnings"][0]
+
+
+def test_run_ffmpeg_forwards_timeout_to_subprocess(monkeypatch):
+    captured: dict = {}
+
+    class _Completed:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured.update(kwargs)
+        return _Completed()
+
+    monkeypatch.setattr("vietdub.sync.subprocess.run", fake_run)
+
+    run_ffmpeg(["ffmpeg", "-version"], timeout=42.0)
+
+    assert captured["timeout"] == 42.0
+    assert captured["capture_output"] is True
+
+
+def test_trim_silence_uses_short_timeout(monkeypatch, tmp_path):
+    captured: dict = {}
+
+    class _Completed:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    monkeypatch.setattr(
+        "vietdub.sync.subprocess.run",
+        lambda command, **kwargs: (captured.update(kwargs) or _Completed()),
+    )
+
+    (tmp_path / "in.wav").write_bytes(b"")
+    trim_silence(tmp_path / "in.wav", tmp_path / "out.wav")
+
+    assert captured["timeout"] == 60.0
+
+
+def test_stretch_audio_uses_short_timeout(monkeypatch, tmp_path):
+    captured: dict = {}
+
+    class _Completed:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    monkeypatch.setattr(
+        "vietdub.sync.subprocess.run",
+        lambda command, **kwargs: (captured.update(kwargs) or _Completed()),
+    )
+
+    (tmp_path / "in.wav").write_bytes(b"")
+    stretch_audio(tmp_path / "in.wav", tmp_path / "out.wav", factor=1.5)
+
+    assert captured["timeout"] == 60.0
