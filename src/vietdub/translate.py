@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import sys
 from json import JSONDecodeError
 from pathlib import Path
 
@@ -42,6 +43,11 @@ def parse_translation_response(content: str) -> list[TranslationRow]:
         if not isinstance(item, dict):
             raise RuntimeError(f"Invalid LLM translation response: translation item {index} is not an object")
         if item.get("status") not in ALLOWED_REVIEW_STATUSES:
+            print(
+                f"Warning: LLM returned invalid status {item.get('status')!r} "
+                f"for segment {item.get('segment_id')!r}; coercing to 'draft'",
+                file=sys.stderr,
+            )
             item = {**item, "status": "draft"}
         try:
             rows.append(TranslationRow.model_validate(item))
@@ -69,49 +75,45 @@ def build_translation_prompt(segments: list[TimedSegment], context_bundle: dict)
 def translate_with_llm(
     segments: list[TimedSegment],
     context_bundle: dict,
-    api_key: str,
-    model: str,
-    base_url: str = "",
+    *,
+    settings,
 ) -> list[TranslationRow]:
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required for translation")
-    if not model:
+    if not settings.anthropic_api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is required for translation")
+    if not settings.llm_model:
         raise RuntimeError("LLM_MODEL is required for translation")
 
-    from openai import APIStatusError, AuthenticationError, OpenAI, OpenAIError
+    import anthropic
 
-    clean_base_url = base_url.rstrip("/")
-    use_responses_endpoint = clean_base_url.endswith("/responses")
-    client_kwargs = {"api_key": api_key}
-    if clean_base_url:
-        client_kwargs["base_url"] = clean_base_url.removesuffix("/responses") if use_responses_endpoint else clean_base_url
-    client = OpenAI(**client_kwargs)
+    client = anthropic.Anthropic(
+        api_key=settings.anthropic_api_key,
+        base_url=settings.anthropic_base_url,
+    )
+    system_prompt = (
+        "You are a Vietnamese localization editor for Chinese comedy cartoons. "
+        "Return JSON only with a top-level \"translations\" array."
+    )
+    user_prompt = build_translation_prompt(segments, context_bundle)
+
     try:
-        prompt = build_translation_prompt(segments, context_bundle)
-        if use_responses_endpoint:
-            response = client.responses.create(
-                model=model,
-                instructions="You are a Vietnamese localization editor for Chinese comedy cartoons.",
-                input=prompt,
-                text={"format": {"type": "json_object"}},
-            )
-            content = response.output_text or "{}"
-        else:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": "You are a Vietnamese localization editor for Chinese comedy cartoons."},
-                    {"role": "user", "content": prompt},
-                ],
-                response_format={"type": "json_object"},
-            )
-            content = response.choices[0].message.content or "{}"
-    except AuthenticationError as exc:
-        raise RuntimeError("OpenAI authentication failed; check OPENAI_API_KEY") from exc
-    except APIStatusError as exc:
-        raise RuntimeError(f"OpenAI request failed with HTTP {exc.status_code}") from exc
-    except OpenAIError as exc:
-        raise RuntimeError(f"OpenAI request failed: {exc.__class__.__name__}") from exc
+        response = client.messages.create(
+            model=settings.llm_model,
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+    except anthropic.AuthenticationError as exc:
+        raise RuntimeError(f"MiniMax authentication failed: {exc}") from exc
+    except anthropic.APIStatusError as exc:
+        raise RuntimeError(f"MiniMax HTTP {exc.status_code}: {exc.message}") from exc
+    except anthropic.APIConnectionError as exc:
+        raise RuntimeError(f"MiniMax network error: {exc}") from exc
+
+    content_blocks = response.content or []
+    text_parts = [getattr(block, "text", "") for block in content_blocks if getattr(block, "type", "") == "text"]
+    if not text_parts:
+        raise RuntimeError("MiniMax returned empty response (no text content blocks)")
+    content = "".join(text_parts)
     return parse_translation_response(content)
 
 
