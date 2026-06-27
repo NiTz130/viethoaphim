@@ -180,6 +180,9 @@ def build_translation_prompt(
     segments: list[TimedSegment],
     context_bundle: dict,
     glossary: dict[str, str] | None = None,
+    pronoun_guide: list[dict[str, str]] | None = None,
+    phrase_patterns: list[dict[str, str]] | None = None,
+    ignore_list: list[str] | None = None,
 ) -> str:
     payload = {
         "instructions": [
@@ -190,6 +193,9 @@ def build_translation_prompt(
             "Aim for the target_vi_chars characters shown per segment (Vietnamese ≈ 14 chars/sec + 10% buffer).",
             "Preserve names and pronouns using the supplied context.",
             "Use the consistency_terms list below to translate recurring Chinese names consistently across batches.",
+            "Use the pronoun_guide to choose appropriate Vietnamese pronouns based on context (modern vs. historical, formal vs. casual).",
+            "Use the phrase_patterns as templates — replace {0} with the appropriate referent when translating matching Chinese phrases.",
+            "If the source text contains any phrase from the ignore_list, exclude it from the translation (it's boilerplate from web scraping, not actual content).",
             "OUTPUT FORMAT (CORRECT): {\"translations\": [{\"segment_id\": \"m-0001\", \"text_vi\": \"...\", ...}]}",
             "OUTPUT FORMAT (INCORRECT — do NOT do this):",
             "  [{\"segment_id\": \"m-0001\", ...}]  (bare array, missing top-level object)",
@@ -199,6 +205,9 @@ def build_translation_prompt(
         "consistency_terms": [
             {"source": cn, "target": vi} for cn, vi in (glossary or {}).items()
         ],
+        "pronoun_guide": pronoun_guide or [],
+        "phrase_patterns": phrase_patterns or [],
+        "ignore_list": ignore_list or [],
         "context": context_bundle,
         "segments": [
             {**segment.model_dump(), "target_vi_chars": _length_target_vi_chars(segment.start_ms, segment.end_ms)}
@@ -228,6 +237,9 @@ def translate_with_llm(
     *,
     settings,
     review: bool = True,
+    pronoun_guide: list[dict[str, str]] | None = None,
+    phrase_patterns: list[dict[str, str]] | None = None,
+    ignore_list: list[str] | None = None,
 ) -> list[TranslationRow]:
     """Translate segments by batching them into LLM calls.
 
@@ -259,11 +271,27 @@ def translate_with_llm(
     glossary: dict[str, str] = dict(_load_initial_glossary())
     _cap_glossary(glossary)
 
+    # Load 3 reference data sections (loaded once, reused across batches)
+    try:
+        ref_root = Path(os.environ.get("REFERENCE_DATA_DIR", "data"))
+        ref_dir = find_reference_data_dir(ref_root)
+        pronoun_guide = _load_pronouns(ref_dir)
+        phrase_patterns = _load_phrase_patterns(ref_dir)
+        ignore_list = _load_ignore_list(ref_dir)
+    except Exception:
+        pronoun_guide = []
+        phrase_patterns = []
+        ignore_list = []
+
     all_rows: list[TranslationRow] = []
     for start in range(0, len(segments), LLM_BATCH_SIZE):
         batch = segments[start:start + LLM_BATCH_SIZE]
         rows = _translate_one_batch_with_retry(
-            batch, context_bundle, settings, glossary=glossary, review=review
+            batch, context_bundle, settings,
+            glossary=glossary, review=review,
+            pronoun_guide=pronoun_guide,
+            phrase_patterns=phrase_patterns,
+            ignore_list=ignore_list,
         )
         all_rows.extend(rows)
         _update_glossary(glossary, rows, batch)
@@ -289,6 +317,48 @@ def _load_initial_glossary() -> dict[str, str]:
     except Exception:
         glossary = {}
     return glossary
+
+
+def _load_pronouns(ref_dir: Path) -> list[dict[str, str]]:
+    """Load pronoun guide from Pronouns.txt. Format: cn=vi per line.
+
+    Uses the shared load_dictionary_entries helper (handles = separator).
+    Returns empty list if file missing.
+    """
+    entries = load_dictionary_entries(ref_dir / "Pronouns.txt")
+    return [{"source": cn, "target": vi} for cn, vi in entries.items()]
+
+
+def _load_phrase_patterns(ref_dir: Path) -> list[dict[str, str]]:
+    """Load phrase patterns from LuatNhan.txt. Format: cn{0}=vi{0} per line.
+
+    Returns list of {source, target} dicts. Empty list if file missing.
+    """
+    patterns: list[dict[str, str]] = []
+    path = ref_dir / "LuatNhan.txt"
+    if not path.exists():
+        return []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        source, target = line.split("=", 1)
+        patterns.append({"source": source.strip(), "target": target.strip()})
+    return patterns
+
+
+def _load_ignore_list(ref_dir: Path) -> list[str]:
+    """Load Chinese boilerplate phrases to ignore from IgnoredChinesePhrases.txt.
+
+    Each line is a long Chinese phrase (boilerplate from web novel scraping).
+    Returns list of raw phrases. Empty list if file missing.
+    """
+    ignore_path = ref_dir / "IgnoredChinesePhrases.txt"
+    if not ignore_path.exists():
+        return []
+    return [line.strip() for line in ignore_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def _update_glossary(
@@ -410,6 +480,9 @@ def _translate_one_batch(
     context_bundle: dict,
     settings,
     glossary: dict[str, str] | None = None,
+    pronoun_guide: list[dict[str, str]] | None = None,
+    phrase_patterns: list[dict[str, str]] | None = None,
+    ignore_list: list[str] | None = None,
 ) -> list[TranslationRow]:
     import anthropic
 
@@ -429,7 +502,12 @@ def _translate_one_batch(
         "- Honor 'translation, not transliteration' — convey meaning, not sounds\n\n"
         "Return JSON only with a top-level 'translations' array."
     )
-    user_prompt = build_translation_prompt(segments, context_bundle, glossary=glossary)
+    user_prompt = build_translation_prompt(
+        segments, context_bundle, glossary=glossary,
+        pronoun_guide=pronoun_guide,
+        phrase_patterns=phrase_patterns,
+        ignore_list=ignore_list,
+    )
 
     try:
         response = client.messages.create(
@@ -472,6 +550,9 @@ def _translate_one_batch_with_retry(
     settings,
     glossary: dict[str, str] | None = None,
     review: bool = True,
+    pronoun_guide: list[dict[str, str]] | None = None,
+    phrase_patterns: list[dict[str, str]] | None = None,
+    ignore_list: list[str] | None = None,
 ) -> list[TranslationRow]:
     """Call _translate_one_batch with exponential-backoff retry on transient errors.
 
@@ -496,7 +577,12 @@ def _translate_one_batch_with_retry(
     last_exc: Exception | None = None
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
-            rows = _translate_one_batch(segments, context_bundle, settings, glossary=glossary)
+            rows = _translate_one_batch(
+                segments, context_bundle, settings, glossary=glossary,
+                pronoun_guide=pronoun_guide,
+                phrase_patterns=phrase_patterns,
+                ignore_list=ignore_list,
+            )
             if review:
                 rows = _review_batch_for_length(rows, context_bundle, settings)
             return rows

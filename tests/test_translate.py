@@ -849,3 +849,54 @@ def test_translate_with_llm_runs_review_pass_when_enabled(monkeypatch):
     assert call_count[0] == 1, f"Expected 1 LLM call (translate only), got {call_count[0]}"
 
 
+def test_build_translation_prompt_includes_pronoun_guide():
+    """build_translation_prompt payload includes pronoun_guide section."""
+    pronoun_guide = [{"source": "你自己", "target": "chính ngươi"}]
+    prompt_json = build_translation_prompt(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="test")],
+        context_bundle={},
+        pronoun_guide=pronoun_guide,
+    )
+    payload = json.loads(prompt_json)
+    assert "pronoun_guide" in payload
+    assert payload["pronoun_guide"] == pronoun_guide
+
+
+def test_build_translation_prompt_includes_phrase_patterns():
+    """build_translation_prompt payload includes phrase_patterns section with placeholders."""
+    phrase_patterns = [{"source": "与{0}为敌为友", "target": "cùng {0} là địch là bạn"}]
+    prompt_json = build_translation_prompt(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="test")],
+        context_bundle={},
+        phrase_patterns=phrase_patterns,
+    )
+    payload = json.loads(prompt_json)
+    assert "phrase_patterns" in payload
+    assert payload["phrase_patterns"] == phrase_patterns
+    # Placeholder preserved
+    assert "{0}" in payload["phrase_patterns"][0]["source"]
+
+
+def test_build_translation_prompt_includes_ignore_list():
+    """build_translation_prompt payload includes ignore_list section."""
+    ignore_list = ["( 小说 《 九 鼎记 ... )", "(未 完 待续)..."]
+    prompt_json = build_translation_prompt(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="test")],
+        context_bundle={},
+        ignore_list=ignore_list,
+    )
+    payload = json.loads(prompt_json)
+    assert "ignore_list" in payload
+    assert payload["ignore_list"] == ignore_list
+
+
+def test_load_helpers_resilient_to_missing_files(tmp_path):
+    """All 3 loaders return empty list when file missing (no exception)."""
+    from vietdub.translate import _load_pronouns, _load_phrase_patterns, _load_ignore_list
+
+    # tmp_path doesn't have any of the data files
+    assert _load_pronouns(tmp_path) == []
+    assert _load_phrase_patterns(tmp_path) == []
+    assert _load_ignore_list(tmp_path) == []
+
+
