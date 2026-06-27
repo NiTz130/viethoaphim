@@ -1,0 +1,19 @@
+# Pinned OCR dependency stack for viethoaphimv4
+# Generated 2026-06-27 — see docs/ocr-setup.md for context
+#
+# Approach: A (pin old protobuf-compatible versions)
+#
+# Install with:
+#   pip install -r requirements-ocr.txt
+#
+# Background: paddlepaddle 2.6.2 requires protobuf<=3.20.2. Newer
+# onnxruntime (>=1.14) and paddleocr's bundled torch expect newer protobuf
+# and have DLL compatibility issues on Windows 11 with Python 3.11.
+# This pins the lowest-compatible versions of onnxruntime + torch that
+# work with paddlepaddle 2.6.2's constraints.
+
+paddlepaddle==2.6.2
+paddleocr==2.10.0
+protobuf==3.20.2
+onnxruntime==1.15.0
+torch==2.2.0
