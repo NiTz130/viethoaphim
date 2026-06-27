@@ -31,6 +31,35 @@ _LEADING_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?")
 _TRAILING_FENCE_RE = re.compile(r"\n?```$")
 
 
+_EXAMPLES: list[dict] = [
+    {
+        "segment_id": "ex-1",
+        "text_cn": "你这个笨蛋！",
+        "text_vi": "Mày ngu vậy!",
+    },
+    {
+        "segment_id": "ex-2",
+        "text_cn": "长老，我们该怎么办？",
+        "text_vi": "Trưởng lão, giờ chúng ta phải làm sao?",
+    },
+    {
+        "segment_id": "ex-3",
+        "text_cn": "哈哈哈哈，你真是太有趣了！",
+        "text_vi": "Hahaha, mày buồn cười thiệt chứ!",
+    },
+]
+
+
+def _length_target_vi_chars(start_ms: int, end_ms: int) -> int:
+    """Compute target Vietnamese character count for a segment.
+
+    Vietnamese conversational speech is ~14 chars/sec; add 10% buffer for
+    punctuation and natural variation. Floor at 10 chars for very short segments.
+    """
+    duration_s = (end_ms - start_ms) / 1000.0
+    return max(10, int(duration_s * 14 * 1.1))
+
+
 def _strip_markdown_fences(content: str) -> str:
     """Strip leading/trailing markdown code fences (e.g. ```json\\n...\\n```).
 
@@ -93,11 +122,19 @@ def build_translation_prompt(segments: list[TimedSegment], context_bundle: dict)
             "Each translation must include segment_id, start_ms, end_ms, speaker, text_cn, text_vi, context_note, and status.",
             "Translate Chinese cartoon dialogue into natural Vietnamese.",
             "Use a silly, meme-friendly tone when the source is comedic.",
-            "Keep Vietnamese lines short enough for dubbing timing.",
+            "Aim for the target_vi_chars characters shown per segment (Vietnamese ≈ 14 chars/sec + 10% buffer).",
             "Preserve names and pronouns using the supplied context.",
+            "OUTPUT FORMAT (CORRECT): {\"translations\": [{\"segment_id\": \"m-0001\", \"text_vi\": \"...\", ...}]}",
+            "OUTPUT FORMAT (INCORRECT — do NOT do this):",
+            "  [{\"segment_id\": \"m-0001\", ...}]  (bare array, missing top-level object)",
+            "  Wrapped in markdown fences or extra braces",
         ],
+        "examples": _EXAMPLES,
         "context": context_bundle,
-        "segments": [segment.model_dump() for segment in segments],
+        "segments": [
+            {**segment.model_dump(), "target_vi_chars": _length_target_vi_chars(segment.start_ms, segment.end_ms)}
+            for segment in segments
+        ],
     }
     return json.dumps(payload, ensure_ascii=False)
 
@@ -166,8 +203,16 @@ def _translate_one_batch(
         base_url=settings.anthropic_base_url,
     )
     system_prompt = (
-        "You are a Vietnamese localization editor for Chinese comedy cartoons. "
-        "Return JSON only with a top-level \"translations\" array."
+        "You are a Vietnamese dubbing translator for Chinese comedy cartoons.\n\n"
+        "TONE: Use natural, colloquial Vietnamese. Embrace meme culture — common "
+        "internet slang like 'vl', 'wtf', 'haha', 'bro' is appropriate for comedic "
+        "moments. For serious/dramatic moments, use more formal Vietnamese.\n\n"
+        "CONVENTIONS:\n"
+        "- Preserve Chinese names in their Vietnamese-accepted form "
+        "(e.g., 长孙无忌 → Trưởng Tôn Vô Kỵ, 白素贞 → Bạch Tố Trinh)\n"
+        "- Use 'ngươi' (archaic you) for historical/fantasy settings, 'bạn' for modern\n"
+        "- Honor 'translation, not transliteration' — convey meaning, not sounds\n\n"
+        "Return JSON only with a top-level 'translations' array."
     )
     user_prompt = build_translation_prompt(segments, context_bundle)
 

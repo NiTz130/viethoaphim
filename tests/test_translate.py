@@ -212,3 +212,76 @@ def test_import_review_csv_reports_invalid_row_number(tmp_path):
 
     with pytest.raises(RuntimeError, match="row 2"):
         import_review_csv(path)
+
+
+def test_build_translation_prompt_includes_examples():
+    """build_translation_prompt payload contains 3+ few-shot examples."""
+    prompt_json = build_translation_prompt(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="\u4f60\u597d")],
+        context_bundle={},
+    )
+    payload = json.loads(prompt_json)
+    assert "examples" in payload
+    assert len(payload["examples"]) >= 3
+    for ex in payload["examples"]:
+        assert "segment_id" in ex
+        assert "text_cn" in ex
+        assert "text_vi" in ex
+
+
+def test_build_translation_prompt_includes_length_targets():
+    """Each segment dict has target_vi_chars based on duration."""
+    prompt_json = build_translation_prompt(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=5000, text="\u6d4b\u8bd5")],
+        context_bundle={},
+    )
+    payload = json.loads(prompt_json)
+    seg = payload["segments"][0]
+    assert "target_vi_chars" in seg
+    assert seg["target_vi_chars"] == 77  # 5s * 14 chars/sec * 1.1 buffer \u2248 77
+
+
+def test_length_target_vi_chars_minimum_floor():
+    """Very short segments still get a minimum target of 10 chars."""
+    prompt_json = build_translation_prompt(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=100, text="hi")],
+        context_bundle={},
+    )
+    payload = json.loads(prompt_json)
+    seg = payload["segments"][0]
+    assert seg["target_vi_chars"] >= 10
+
+
+def test_translation_examples_have_valid_format():
+    """All examples have segment_id prefix 'ex-' and non-empty text fields."""
+    prompt_json = build_translation_prompt(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="\u4f60\u597d")],
+        context_bundle={},
+    )
+    payload = json.loads(prompt_json)
+    for ex in payload["examples"]:
+        assert ex["segment_id"].startswith("ex-")
+        assert ex["text_cn"]
+        assert ex["text_vi"]
+
+
+def test_translate_pipeline_produces_valid_response():
+    """Integration: new prompts don't break the existing parse path."""
+    from vietdub.translate import translate_with_llm
+    from vietdub.models import TimedSegment
+    from tests.test_translate_responses import _FakeAnthropic, _settings
+    import sys
+    import types
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_FakeAnthropic))
+
+    rows = translate_with_llm(
+        segments=[TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="\u4f60\u597d")],
+        context_bundle={},
+        settings=_settings(),
+    )
+
+    assert len(rows) == 1
+    assert rows[0].text_vi == "Xin ch\u00e0o"  # from _FakeMessages
+    monkey.undo()
