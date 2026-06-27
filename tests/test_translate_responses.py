@@ -58,14 +58,15 @@ class _BatchAwareMessages:
         user_prompt = kwargs["messages"][0]["content"]
         payload = json.loads(user_prompt)
         batch_segments = payload["segments"]
+        # Translate prompts use {"id": ...} for segments; review prompts use {"segment_id": ...}
         translations = [
             {
-                "segment_id": seg["id"],
-                "start_ms": seg["start_ms"],
-                "end_ms": seg["end_ms"],
+                "segment_id": seg.get("id") or seg["segment_id"],
+                "start_ms": seg.get("start_ms", 0),
+                "end_ms": seg.get("end_ms", 1000),
                 "speaker": seg.get("speaker"),
                 "text_cn": seg.get("text", ""),
-                "text_vi": f"translation of {seg['id']}",
+                "text_vi": f"translation of {seg.get('id') or seg['segment_id']}",
                 "context_note": "",
                 "status": "draft",
             }
@@ -307,7 +308,7 @@ def test_translate_one_batch_with_retry_recovers_from_transient_connection_error
         settings=_settings(),
     )
 
-    assert call_count[0] == 3
+    assert call_count[0] == 4  # 2 failed translate + 1 successful translate + 1 review
     assert sleep_calls == [1.0, 2.0]
     assert rows[0].text_vi == "Xin chào"
 
@@ -567,8 +568,11 @@ def test_translate_with_llm_batches_50_segments_into_one_call(monkeypatch):
     rows = translate_with_llm(segments=segments, context_bundle={}, settings=_settings())
 
     assert len(rows) == 50
-    assert len(_BatchAwareAnthropic.instances) == 1
+    # With review=True (default), 1 batch × 2 calls = 2 Anthropic instances (translate + review)
+    assert len(_BatchAwareAnthropic.instances) == 2
+    # Each instance handles one call (translate client, then review client)
     assert len(_BatchAwareAnthropic.instances[0].messages.calls) == 1
+    assert len(_BatchAwareAnthropic.instances[1].messages.calls) == 1
 
 
 def test_translate_with_llm_batches_51_segments_into_two_calls(monkeypatch):
@@ -583,16 +587,17 @@ def test_translate_with_llm_batches_51_segments_into_two_calls(monkeypatch):
     rows = translate_with_llm(segments=segments, context_bundle={}, settings=_settings())
 
     assert len(rows) == 51
-    assert len(_BatchAwareAnthropic.instances) == 2
+    # With review=True (default), 2 batches × 2 calls (translate + review) = 4 instances
+    assert len(_BatchAwareAnthropic.instances) == 4
     # First call covers m-0000..m-0049 (50 segments)
     first_payload = json.loads(
         _BatchAwareAnthropic.instances[0].messages.calls[0]["messages"][0]["content"]
     )
     assert len(first_payload["segments"]) == 50
     assert first_payload["segments"][0]["id"] == "m-0000"
-    # Second call covers m-0050 (1 segment)
+    # Third call (index 2) covers m-0050 (1 segment) — second batch's translate call
     second_payload = json.loads(
-        _BatchAwareAnthropic.instances[1].messages.calls[0]["messages"][0]["content"]
+        _BatchAwareAnthropic.instances[2].messages.calls[0]["messages"][0]["content"]
     )
     assert len(second_payload["segments"]) == 1
     assert second_payload["segments"][0]["id"] == "m-0050"
@@ -610,7 +615,8 @@ def test_translate_with_llm_batches_100_segments_into_two_calls(monkeypatch):
     rows = translate_with_llm(segments=segments, context_bundle={}, settings=_settings())
 
     assert len(rows) == 100
-    assert len(_BatchAwareAnthropic.instances) == 2
+    # With review=True (default), 2 batches × 2 calls = 4 instances
+    assert len(_BatchAwareAnthropic.instances) == 4
 
 
 def test_translate_with_llm_handles_empty_segments(monkeypatch):

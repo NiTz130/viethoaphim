@@ -523,10 +523,17 @@ def test_translate_with_llm_passes_glossary_to_subsequent_batches(monkeypatch):
     monkeypatch.setattr(t, "LLM_BATCH_SIZE", 1)
     translate_with_llm(segments=segments, context_bundle={}, settings=settings)
 
-    assert len(captured_prompts) == 2
+    # With review=True (default), each batch now makes 2 LLM calls (translate + review).
+    # Filter to only translate prompts (those with "consistency_terms" — review prompts
+    # have a different payload shape with no consistency_terms).
+    translate_prompts = [
+        p for p in captured_prompts
+        if "consistency_terms" in json.loads(p)
+    ]
+    assert len(translate_prompts) == 2
     # First batch's prompt: empty consistency_terms (glossary starts empty if Names.txt absent)
-    first_payload = json.loads(captured_prompts[0])
-    second_payload = json.loads(captured_prompts[1])
+    first_payload = json.loads(translate_prompts[0])
+    second_payload = json.loads(translate_prompts[1])
     # Second batch's prompt should include the glossary entry from batch 1
     sources = [t["source"] for t in second_payload.get("consistency_terms", [])]
     assert "长孙无忌" in sources
@@ -558,5 +565,287 @@ def test_build_translation_prompt_includes_consistency_terms():
     payload = json.loads(prompt_json)
     assert "consistency_terms" in payload
     assert {"source": "长孙无忌", "target": "Trưởng Tôn"} in payload["consistency_terms"]
+
+
+def test_review_batch_for_length_returns_refined_translations(monkeypatch):
+    """Review pass returns refined translations that match length target."""
+    import sys
+    import types
+    from vietdub.translate import _review_batch_for_length
+
+    # Build initial rows (oversized)
+    rows = [
+        TranslationRow(
+            segment_id="m-0001", start_ms=0, end_ms=1000, speaker=None,
+            text_cn="你好世界", text_vi="Xin chào bạn ơi nhé nhé nhé",
+            context_note="", status="draft",
+        )
+    ]
+
+    # Mock anthropic to return a shorter text_vi
+    class _TextBlock:
+        def __init__(self, text):
+            self.text = text
+            self.type = "text"
+
+    class _RefiningMessages:
+        def create(self, **kwargs):
+            return types.SimpleNamespace(
+                content=[_TextBlock(json.dumps({
+                    "translations": [{
+                        "segment_id": "m-0001",
+                        "start_ms": 0,
+                        "end_ms": 1000,
+                        "speaker": None,
+                        "text_cn": "你好世界",
+                        "text_vi": "Xin chào bạn",
+                        "context_note": "",
+                        "status": "draft",
+                    }]
+                }))],
+                stop_reason="end_turn",
+            )
+
+    class _RefiningAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = _RefiningMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic",
+                        types.SimpleNamespace(Anthropic=_RefiningAnthropic))
+
+    settings = types.SimpleNamespace(
+        anthropic_api_key="test-key",
+        anthropic_base_url="https://api.minimax.io/anthropic",
+        llm_model="MiniMax-M3",
+    )
+
+    refined = _review_batch_for_length(rows, context_bundle={}, settings=settings)
+    assert len(refined) == 1
+    assert refined[0].text_vi == "Xin chào bạn"
+    # Original fields preserved
+    assert refined[0].segment_id == "m-0001"
+    assert refined[0].start_ms == 0
+    assert refined[0].end_ms == 1000
+
+
+def test_review_batch_for_length_preserves_unchanged_translations(monkeypatch):
+    """Review pass preserves translations already within budget."""
+    import sys
+    import types
+    from vietdub.translate import _review_batch_for_length
+
+    rows = [
+        TranslationRow(
+            segment_id="m-0001", start_ms=0, end_ms=1000, speaker=None,
+            text_cn="你好", text_vi="Xin chào",  # short, within budget
+            context_note="", status="draft",
+        )
+    ]
+
+    class _TextBlock:
+        def __init__(self, text):
+            self.text = text
+            self.type = "text"
+
+    # Mock returns SAME text (review should preserve it)
+    class _PreservingMessages:
+        def create(self, **kwargs):
+            return types.SimpleNamespace(
+                content=[_TextBlock(json.dumps({
+                    "translations": [{
+                        "segment_id": "m-0001",
+                        "start_ms": 0,
+                        "end_ms": 1000,
+                        "speaker": None,
+                        "text_cn": "你好",
+                        "text_vi": "Xin chào",  # unchanged
+                        "context_note": "",
+                        "status": "draft",
+                    }]
+                }))],
+                stop_reason="end_turn",
+            )
+
+    class _PreservingAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = _PreservingMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic",
+                        types.SimpleNamespace(Anthropic=_PreservingAnthropic))
+
+    settings = types.SimpleNamespace(
+        anthropic_api_key="test-key",
+        anthropic_base_url="https://api.minimax.io/anthropic",
+        llm_model="MiniMax-M3",
+    )
+
+    refined = _review_batch_for_length(rows, context_bundle={}, settings=settings)
+    assert refined[0].text_vi == "Xin chào"
+
+
+def test_review_batch_for_length_handles_partial_review_response(monkeypatch):
+    """If review returns only some segments, keep originals for missing ones."""
+    import sys
+    import types
+    from vietdub.translate import _review_batch_for_length
+
+    rows = [
+        TranslationRow(segment_id="m-0001", start_ms=0, end_ms=1000, speaker=None,
+                       text_cn="a", text_vi="orig1", context_note="", status="draft"),
+        TranslationRow(segment_id="m-0002", start_ms=0, end_ms=1000, speaker=None,
+                       text_cn="b", text_vi="orig2", context_note="", status="draft"),
+    ]
+
+    class _TextBlock:
+        def __init__(self, text):
+            self.text = text
+            self.type = "text"
+
+    # Mock returns only 1 of 2 segments
+    class _PartialMessages:
+        def create(self, **kwargs):
+            return types.SimpleNamespace(
+                content=[_TextBlock(json.dumps({
+                    "translations": [{
+                        "segment_id": "m-0001",
+                        "start_ms": 0,
+                        "end_ms": 1000,
+                        "speaker": None,
+                        "text_cn": "a",
+                        "text_vi": "refined1",
+                        "context_note": "",
+                        "status": "draft",
+                    }]  # m-0002 missing
+                }))],
+                stop_reason="end_turn",
+            )
+
+    class _PartialAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = _PartialMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic",
+                        types.SimpleNamespace(Anthropic=_PartialAnthropic))
+
+    settings = types.SimpleNamespace(
+        anthropic_api_key="test-key",
+        anthropic_base_url="https://api.minimax.io/anthropic",
+        llm_model="MiniMax-M3",
+    )
+
+    refined = _review_batch_for_length(rows, context_bundle={}, settings=settings)
+    assert refined[0].text_vi == "refined1"  # updated
+    assert refined[1].text_vi == "orig2"     # kept original
+
+
+def test_review_batch_for_length_skips_empty_refinement(monkeypatch):
+    """If review returns empty text_vi, keep original."""
+    import sys
+    import types
+    from vietdub.translate import _review_batch_for_length
+
+    rows = [
+        TranslationRow(segment_id="m-0001", start_ms=0, end_ms=1000, speaker=None,
+                       text_cn="a", text_vi="original text", context_note="", status="draft"),
+    ]
+
+    class _TextBlock:
+        def __init__(self, text):
+            self.text = text
+            self.type = "text"
+
+    # Mock returns EMPTY text_vi
+    class _EmptyMessages:
+        def create(self, **kwargs):
+            return types.SimpleNamespace(
+                content=[_TextBlock(json.dumps({
+                    "translations": [{
+                        "segment_id": "m-0001",
+                        "start_ms": 0,
+                        "end_ms": 1000,
+                        "speaker": None,
+                        "text_cn": "a",
+                        "text_vi": "",  # empty!
+                        "context_note": "",
+                        "status": "draft",
+                    }]
+                }))],
+                stop_reason="end_turn",
+            )
+
+    class _EmptyAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = _EmptyMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic",
+                        types.SimpleNamespace(Anthropic=_EmptyAnthropic))
+
+    settings = types.SimpleNamespace(
+        anthropic_api_key="test-key",
+        anthropic_base_url="https://api.minimax.io/anthropic",
+        llm_model="MiniMax-M3",
+    )
+
+    refined = _review_batch_for_length(rows, context_bundle={}, settings=settings)
+    assert refined[0].text_vi == "original text"  # kept
+
+
+def test_translate_with_llm_runs_review_pass_when_enabled(monkeypatch):
+    """translate_with_llm calls LLM twice per batch when review=True, once when False."""
+    import sys
+    import types
+
+    import vietdub.translate as t
+    call_count = [0]
+
+    class _TextBlock:
+        def __init__(self, text):
+            self.text = text
+            self.type = "text"
+
+    class _CountingMessages:
+        def create(self, **kwargs):
+            call_count[0] += 1
+            # Return a single-row response (works for both translate and review)
+            return types.SimpleNamespace(
+                content=[_TextBlock(json.dumps({
+                    "translations": [{
+                        "segment_id": "m-0001",
+                        "start_ms": 0,
+                        "end_ms": 1000,
+                        "speaker": None,
+                        "text_cn": "你好",
+                        "text_vi": "Xin chào",
+                        "context_note": "",
+                        "status": "draft",
+                    }]
+                }))],
+                stop_reason="end_turn",
+            )
+
+    class _CountingAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = _CountingMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic",
+                        types.SimpleNamespace(Anthropic=_CountingAnthropic))
+
+    settings = types.SimpleNamespace(
+        anthropic_api_key="test-key",
+        anthropic_base_url="https://api.minimax.io/anthropic",
+        llm_model="MiniMax-M3",
+    )
+
+    segments = [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="你好")]
+
+    # With review=True (default): expect 2 LLM calls (translate + review)
+    call_count[0] = 0
+    translate_with_llm(segments=segments, context_bundle={}, settings=settings, review=True)
+    assert call_count[0] == 2, f"Expected 2 LLM calls (translate + review), got {call_count[0]}"
+
+    # With review=False: expect 1 LLM call (translate only)
+    call_count[0] = 0
+    translate_with_llm(segments=segments, context_bundle={}, settings=settings, review=False)
+    assert call_count[0] == 1, f"Expected 1 LLM call (translate only), got {call_count[0]}"
 
 

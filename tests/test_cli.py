@@ -42,8 +42,8 @@ def test_run_auto_resumes_tts_and_render(monkeypatch, tmp_path):
     job = Job(root=job_root, config={})
     calls = []
 
-    def fake_run_review_pipeline(video, jobs_dir, series, settings):
-        calls.append(("review", video, jobs_dir, series))
+    def fake_run_review_pipeline(video, jobs_dir, series, settings, review=True):
+        calls.append(("review", video, jobs_dir, series, review))
         return job
 
     def fake_resume_tts_and_render(job_arg, settings):
@@ -71,7 +71,7 @@ def test_run_auto_runtime_error_is_click_error(monkeypatch, tmp_path):
     job_root.mkdir(parents=True)
     job = Job(root=job_root, config={})
 
-    def fake_run_review_pipeline(video, jobs_dir, series, settings):
+    def fake_run_review_pipeline(video, jobs_dir, series, settings, review=True):
         return job
 
     def fail_resume(job_arg, settings):

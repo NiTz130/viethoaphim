@@ -206,11 +206,14 @@ def translate_with_llm(
     context_bundle: dict,
     *,
     settings,
+    review: bool = True,
 ) -> list[TranslationRow]:
     """Translate segments by batching them into LLM calls.
 
     A single LLM call cannot handle hundreds of segments within max_tokens
     limits, so we batch into groups of LLM_BATCH_SIZE and concatenate results.
+    When review=True (default), each batch is followed by an LLM review pass
+    that refines translations exceeding target_vi_chars.
     """
     if not settings.anthropic_api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is required for translation")
@@ -238,7 +241,9 @@ def translate_with_llm(
     all_rows: list[TranslationRow] = []
     for start in range(0, len(segments), LLM_BATCH_SIZE):
         batch = segments[start:start + LLM_BATCH_SIZE]
-        rows = _translate_one_batch_with_retry(batch, context_bundle, settings, glossary=glossary)
+        rows = _translate_one_batch_with_retry(
+            batch, context_bundle, settings, glossary=glossary, review=review
+        )
         all_rows.extend(rows)
         _update_glossary(glossary, rows, batch)
         _cap_glossary(glossary)
@@ -296,6 +301,87 @@ def _cap_glossary(
     while len(glossary) > max_entries:
         oldest_key = next(iter(glossary))
         del glossary[oldest_key]
+
+
+def _review_batch_for_length(
+    rows: list[TranslationRow],
+    context_bundle: dict,
+    settings,
+) -> list[TranslationRow]:
+    """Review translations for length compliance and return refined rows.
+
+    Sends each row's text_cn, text_vi, and target_vi_chars to the LLM with
+    instruction to refine translations that significantly exceed target.
+    Returns a new list of rows with updated text_vi (matching by segment_id).
+    """
+    anthropic_mod = sys.modules.get("anthropic")
+    if anthropic_mod is None:
+        import anthropic as anthropic_mod
+    api_connection_error = getattr(anthropic_mod, "APIConnectionError", ())
+    api_status_error = getattr(anthropic_mod, "APIStatusError", ())
+    authentication_error = getattr(anthropic_mod, "AuthenticationError", ())
+
+    review_payload = {
+        "instructions": [
+            "Review these Vietnamese translations for length compliance.",
+            "For each segment, target_vi_chars is the budget based on segment duration "
+            "(Vietnamese ≈ 14 chars/sec + 10% buffer).",
+            "Refine any translation that significantly exceeds its target_vi_chars "
+            "(make it shorter while preserving meaning and tone).",
+            "For translations already within budget or under budget, return unchanged.",
+            "Preserve segment_id and original meaning; only adjust text_vi for length.",
+            "Return JSON only with a top-level \"translations\" array.",
+        ],
+        "segments": [
+            {
+                "segment_id": row.segment_id,
+                "text_cn": row.text_cn,
+                "text_vi": row.text_vi,
+                "target_vi_chars": _length_target_vi_chars(row.start_ms, row.end_ms),
+            }
+            for row in rows
+        ],
+    }
+
+    client = anthropic_mod.Anthropic(
+        api_key=settings.anthropic_api_key,
+        base_url=settings.anthropic_base_url,
+    )
+
+    try:
+        response = client.messages.create(
+            model=settings.llm_model,
+            max_tokens=LLM_MAX_TOKENS,
+            system=(
+                "You are a Vietnamese translation editor refining for length. "
+                "Return JSON only with a top-level \"translations\" array."
+            ),
+            messages=[{"role": "user", "content": json.dumps(review_payload, ensure_ascii=False)}],
+        )
+    except api_connection_error:
+        raise
+    except api_status_error:
+        raise
+    except authentication_error:
+        raise
+
+    content_blocks = response.content or []
+    text_parts = [getattr(block, "text", "") for block in content_blocks if getattr(block, "type", "") == "text"]
+    if not text_parts:
+        raise RuntimeError("MiniMax review returned empty response (no text content blocks)")
+    content = "".join(text_parts)
+    refined_rows = parse_translation_response(content)
+
+    refined_map: dict[str, str] = {r.segment_id: r.text_vi for r in refined_rows}
+
+    output = []
+    for row in rows:
+        new_text = refined_map.get(row.segment_id, "").strip()
+        if new_text:
+            output.append(row.model_copy(update={"text_vi": new_text}))
+        else:
+            output.append(row)
+    return output
 
 
 def _translate_one_batch(
@@ -364,8 +450,12 @@ def _translate_one_batch_with_retry(
     context_bundle: dict,
     settings,
     glossary: dict[str, str] | None = None,
+    review: bool = True,
 ) -> list[TranslationRow]:
     """Call _translate_one_batch with exponential-backoff retry on transient errors.
+
+    If review=True, runs a second LLM call per batch to refine translations
+    for length compliance.
 
     Catches bare `anthropic.*` exceptions (raised unwrapped from
     `_translate_one_batch`) and retries on transient failures (network errors,
@@ -385,7 +475,10 @@ def _translate_one_batch_with_retry(
     last_exc: Exception | None = None
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
-            return _translate_one_batch(segments, context_bundle, settings, glossary=glossary)
+            rows = _translate_one_batch(segments, context_bundle, settings, glossary=glossary)
+            if review:
+                rows = _review_batch_for_length(rows, context_bundle, settings)
+            return rows
         except api_connection_error as exc:
             last_exc = exc
             if attempt == LLM_MAX_RETRIES:

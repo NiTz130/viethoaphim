@@ -723,7 +723,7 @@ def test_review_pipeline_writes_selected_system_memory(monkeypatch, tmp_path):
                 )
             ]
 
-    def fake_translate(segments, context_bundle, *, settings):
+    def fake_translate(segments, context_bundle, *, settings, review=True):
         captured_context.update(context_bundle)
         return [
             type(
@@ -818,7 +818,7 @@ def test_review_pipeline_persists_artifacts_before_translate_failure(monkeypatch
         def recognize(self, video_path):
             return [TimedSegment(id="o-0001", start_ms=0, end_ms=1000, text="\u4f60\u597d", source="ocr")]
 
-    def fail_translate(segments, context_bundle, *, settings):
+    def fail_translate(segments, context_bundle, *, settings, review=True):
         raise RuntimeError("translation failed")
 
     monkeypatch.setattr("vietdub.media.extract_audio", fake_extract_audio)

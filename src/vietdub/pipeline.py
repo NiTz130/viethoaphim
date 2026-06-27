@@ -49,7 +49,7 @@ def run_fixture_pipeline(video: Path, jobs_dir: Path, stt_fixture: Path, ocr_fix
     return job
 
 
-def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, settings) -> Job:
+def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, settings, review: bool = True) -> Job:
     from .config import Settings
     from .media import extract_audio
     from .memory import collect_system_memory, select_relevant_memory
@@ -101,6 +101,7 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
         merged,
         context_bundle,
         settings=typed_settings,
+        review=review,
     )
     job.write_json("translation/translated.json", [row.model_dump() for row in translations])
     export_review_csv(job.root / "translation" / "review.csv", merged, translations)

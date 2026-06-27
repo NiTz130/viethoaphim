@@ -30,6 +30,7 @@ def run(
     video: Path,
     mode: str = typer.Option("review", "--mode", help="Pipeline mode: review or auto."),
     series: str | None = typer.Option(None, "--series", help="Series memory name."),
+    no_review: bool = typer.Option(False, "--no-review", help="Skip length review pass (saves LLM cost)."),
 ) -> None:
     if mode not in {"review", "auto"}:
         raise typer.BadParameter("mode must be review or auto")
@@ -37,7 +38,13 @@ def run(
         raise typer.BadParameter(f"Video not found: {video}")
     settings = Settings()
     try:
-        job = run_review_pipeline(video=video, jobs_dir=Path(settings.jobs_dir), series=series, settings=settings)
+        job = run_review_pipeline(
+            video=video,
+            jobs_dir=Path(settings.jobs_dir),
+            series=series,
+            settings=settings,
+            review=not no_review,
+        )
     except RuntimeError as exc:
         raise click.ClickException(str(exc)) from None
     safe_echo(f"Review file written: {job.root / 'translation' / 'review.csv'}")
