@@ -55,7 +55,17 @@ cd C:\code\viethoaphimv4
 python C:\code\test\scripts\run_pipeline.py review
 ```
 
-Output: 211+ segments with Chinese → Vietnamese translations in `jobs/<job-name>/translation/review.csv`.
+Output: 600+ segments with Chinese → Vietnamese translations in `jobs/<job-name>/translation/review.csv`. STT alone produces ~211 segments; OCR adds ~400 Chinese subtitle segments, bringing the total to ~608.
+
+## Upgrading safely
+
+If you later run `pip install --upgrade` (e.g., for unrelated packages), pip may upgrade paddlepaddle, paddleocr, or torch to incompatible versions. To restore the working combo:
+
+```bash
+pip install -r requirements-ocr.txt
+```
+
+Do NOT run `pip install paddlepaddle-gpu` — this is the GPU variant and has different deps. Stick with the CPU-only `paddlepaddle` package.
 
 ## Troubleshooting
 
