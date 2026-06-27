@@ -8,6 +8,7 @@ from vietdub.translate import (
     export_review_csv,
     import_review_csv,
     parse_translation_response,
+    translate_with_llm,
 )
 
 
@@ -270,7 +271,6 @@ def test_translate_pipeline_produces_valid_response():
     import sys
     import types
 
-    from vietdub.translate import translate_with_llm
     from vietdub.models import TimedSegment
 
     class _TextBlock:
@@ -520,12 +520,8 @@ def test_translate_with_llm_passes_glossary_to_subsequent_batches(monkeypatch):
     # With LLM_BATCH_SIZE=50, both fit in one batch. To force 2 batches,
     # we patch LLM_BATCH_SIZE temporarily.
     import vietdub.translate as t
-    original_batch_size = t.LLM_BATCH_SIZE
-    t.LLM_BATCH_SIZE = 1
-    try:
-        translate_with_llm(segments=segments, context_bundle={}, settings=settings)
-    finally:
-        t.LLM_BATCH_SIZE = original_batch_size
+    monkeypatch.setattr(t, "LLM_BATCH_SIZE", 1)
+    translate_with_llm(segments=segments, context_bundle={}, settings=settings)
 
     assert len(captured_prompts) == 2
     # First batch's prompt: empty consistency_terms (glossary starts empty if Names.txt absent)
@@ -564,5 +560,3 @@ def test_build_translation_prompt_includes_consistency_terms():
     assert {"source": "长孙无忌", "target": "Trưởng Tôn"} in payload["consistency_terms"]
 
 
-# Import translate_with_llm at module scope (used by test_translate_with_llm_passes_glossary_to_subsequent_batches)
-from vietdub.translate import translate_with_llm  # noqa: E402

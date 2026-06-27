@@ -12,6 +12,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .models import TimedSegment, TranslationRow
+from .reference import find_reference_data_dir, load_dictionary_entries
 
 
 CSV_FIELDS = [
@@ -232,6 +233,7 @@ def translate_with_llm(
         )
 
     glossary: dict[str, str] = dict(_load_initial_glossary())
+    _cap_glossary(glossary)
 
     all_rows: list[TranslationRow] = []
     for start in range(0, len(segments), LLM_BATCH_SIZE):
@@ -247,24 +249,19 @@ def translate_with_llm(
 def _load_initial_glossary() -> dict[str, str]:
     """Load initial name glossary from reference data (Names.txt).
 
-    Format: whitespace-separated 'cn_name vi_name' pairs, one per line.
-    Skips empty lines and lines starting with '#'. Returns empty dict
-    if the file is missing or unreadable.
+    Uses the shared ``load_dictionary_entries`` helper, which parses the
+    real ``cn_name=vi_name`` format. The reference directory is located via
+    ``find_reference_data_dir`` so it works with both flat and nested
+    layouts (e.g. ``data/Data của thtgiang (đọc README)/``). Returns an
+    empty dict if the file is missing or unreadable.
     """
     glossary: dict[str, str] = {}
     try:
-        ref_dir = Path(os.environ.get("REFERENCE_DATA_DIR", "data"))
-        names_file = ref_dir / "Names.txt"
-        if names_file.exists():
-            for line in names_file.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split(None, 1)
-                if len(parts) == 2:
-                    glossary[parts[0]] = parts[1]
+        ref_root = Path(os.environ.get("REFERENCE_DATA_DIR", "data"))
+        ref_dir = find_reference_data_dir(ref_root)
+        glossary = load_dictionary_entries(ref_dir / "Names.txt")
     except Exception:
-        pass
+        glossary = {}
     return glossary
 
 
@@ -288,7 +285,7 @@ def _update_glossary(
                 break
             vi_word = vi_words[i].strip(".,!?;:")
             if len(vi_word) >= 2 and vi_word[0].isupper():
-                glossary[cn_name] = vi_word
+                glossary.setdefault(cn_name, vi_word)
 
 
 def _cap_glossary(
