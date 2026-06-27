@@ -60,6 +60,38 @@ def _length_target_vi_chars(start_ms: int, end_ms: int) -> int:
     return max(10, int(duration_s * 14 * 1.1))
 
 
+_LENGTH_TOLERANCE = 0.20  # ±20% of target_vi_chars
+
+
+def _warn_oversized_translations(rows: list[TranslationRow]) -> None:
+    """Warn if Vietnamese translation length is outside ±20% of target.
+
+    Skips empty translations and segments in the floor region (target < 10).
+    Warnings go to stderr with [LEN WARNING] prefix for easy filtering.
+    """
+    for row in rows:
+        text_len = len(row.text_vi)
+        if text_len == 0:
+            continue
+        target = _length_target_vi_chars(row.start_ms, row.end_ms)
+        if target <= 10:
+            continue
+        if text_len > target * (1 + _LENGTH_TOLERANCE):
+            over_pct = int((text_len / target - 1) * 100)
+            print(
+                f"[LEN WARNING] segment {row.segment_id}: {text_len} chars vs target {target} "
+                f"({over_pct}% over). Vietnamese translation may exceed dubbing timing.",
+                file=sys.stderr,
+            )
+        elif text_len < target * (1 - _LENGTH_TOLERANCE):
+            under_pct = int((1 - text_len / target) * 100)
+            print(
+                f"[LEN WARNING] segment {row.segment_id}: {text_len} chars vs target {target} "
+                f"({under_pct}% under). Vietnamese translation may read too fast for dubbing.",
+                file=sys.stderr,
+            )
+
+
 def _strip_markdown_fences(content: str) -> str:
     """Strip leading/trailing markdown code fences (e.g. ```json\\n...\\n```).
 
@@ -112,6 +144,9 @@ def parse_translation_response(content: str) -> list[TranslationRow]:
                 f"Invalid LLM translation response: translation item {index} "
                 f"(segment_id={item.get('segment_id', '?')!r}) failed validation: {exc}"
             ) from exc
+
+    _warn_oversized_translations(rows)
+
     return rows
 
 

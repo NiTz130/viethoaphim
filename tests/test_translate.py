@@ -321,3 +321,105 @@ def test_translate_pipeline_produces_valid_response():
     assert len(rows) == 1
     assert rows[0].text_vi == "Xin ch\u00e0o"
     monkey.undo()
+
+
+def test_parse_translation_response_warns_on_oversized_translation(capsys):
+    """Translation > 120% of target emits [LEN WARNING] to stderr."""
+    payload = json.dumps({
+        "translations": [{
+            "segment_id": "m-0042",
+            "start_ms": 0,
+            "end_ms": 1000,
+            "speaker": None,
+            "text_cn": "\u4f60\u597d",
+            "text_vi": "\u554a" * 50,
+            "context_note": "",
+            "status": "draft",
+        }]
+    })
+    parse_translation_response(payload)
+    captured = capsys.readouterr()
+    assert "[LEN WARNING]" in captured.err
+    assert "m-0042" in captured.err
+    assert "over" in captured.err
+
+
+def test_parse_translation_response_warns_on_undersized_translation(capsys):
+    """Translation < 80% of target emits [LEN WARNING] to stderr."""
+    payload = json.dumps({
+        "translations": [{
+            "segment_id": "m-0099",
+            "start_ms": 0,
+            "end_ms": 5000,
+            "speaker": None,
+            "text_cn": "\u4f60\u597d\u4e16\u754c",
+            "text_vi": "xin ch\u00e0o",
+            "context_note": "",
+            "status": "draft",
+        }]
+    })
+    parse_translation_response(payload)
+    captured = capsys.readouterr()
+    assert "[LEN WARNING]" in captured.err
+    assert "m-0099" in captured.err
+    assert "under" in captured.err
+
+
+def test_parse_translation_response_no_warn_within_tolerance(capsys):
+    """Translation within \u00b120% of target emits no [LEN WARNING]."""
+    payload = json.dumps({
+        "translations": [{
+            "segment_id": "m-0001",
+            "start_ms": 0,
+            "end_ms": 1000,
+            "speaker": None,
+            "text_cn": "\u4f60\u597d",
+            "text_vi": "xin ch\u00e0o b\u1ea1n",
+            "context_note": "",
+            "status": "draft",
+        }]
+    })
+    parse_translation_response(payload)
+    captured = capsys.readouterr()
+    assert "[LEN WARNING]" not in captured.err
+
+
+def test_parse_translation_response_skips_length_check_for_empty_translation(capsys):
+    """Empty text_vi is not length-checked (would always 'under')."""
+    payload = json.dumps({
+        "translations": [{
+            "segment_id": "m-empty",
+            "start_ms": 0,
+            "end_ms": 5000,
+            "speaker": None,
+            "text_cn": "\u4f60\u597d",
+            "text_vi": "",
+            "context_note": "",
+            "status": "draft",
+        }]
+    })
+    rows = parse_translation_response(payload)
+    assert len(rows) == 1
+    assert rows[0].text_vi == ""
+    captured = capsys.readouterr()
+    assert "[LEN WARNING]" not in captured.err
+
+
+def test_parse_translation_response_skips_length_check_for_very_short_segments(capsys):
+    """Segments with target < 10 chars (floor region) skip length check."""
+    payload = json.dumps({
+        "translations": [{
+            "segment_id": "m-short",
+            "start_ms": 0,
+            "end_ms": 100,
+            "speaker": None,
+            "text_cn": "hi",
+            "text_vi": "a" * 50,
+            "context_note": "",
+            "status": "draft",
+        }]
+    })
+    rows = parse_translation_response(payload)
+    assert len(rows) == 1
+    captured = capsys.readouterr()
+    assert "[LEN WARNING]" not in captured.err
