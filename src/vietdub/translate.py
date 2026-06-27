@@ -39,18 +39,33 @@ _MAX_GLOSSARY_ENTRIES = 50
 _EXAMPLES: list[dict] = [
     {
         "segment_id": "ex-1",
+        "start_ms": 0,
+        "end_ms": 2440,
+        "speaker": "",
         "text_cn": "你这个笨蛋！",
         "text_vi": "Mày ngu vậy!",
+        "context_note": "",
+        "status": "draft",
     },
     {
         "segment_id": "ex-2",
+        "start_ms": 2440,
+        "end_ms": 4320,
+        "speaker": "",
         "text_cn": "长老，我们该怎么办？",
         "text_vi": "Trưởng lão, giờ chúng ta phải làm sao?",
+        "context_note": "",
+        "status": "draft",
     },
     {
         "segment_id": "ex-3",
+        "start_ms": 4320,
+        "end_ms": 5960,
+        "speaker": "",
         "text_cn": "哈哈哈哈，你真是太有趣了！",
         "text_vi": "Hahaha, mày buồn cười thiệt chứ!",
+        "context_note": "",
+        "status": "draft",
     },
 ]
 
@@ -196,7 +211,7 @@ def build_translation_prompt(
             "Use the pronoun_guide to choose appropriate Vietnamese pronouns based on context (modern vs. historical, formal vs. casual).",
             "Use the phrase_patterns as templates — replace {0} with the appropriate referent when translating matching Chinese phrases.",
             "If the source text contains any phrase from the ignore_list, exclude it from the translation (it's boilerplate from web scraping, not actual content).",
-            "OUTPUT FORMAT (CORRECT): {\"translations\": [{\"segment_id\": \"m-0001\", \"text_vi\": \"...\", ...}]}",
+            "OUTPUT FORMAT (CORRECT): {\"translations\": [{\"segment_id\": \"m-0001\", \"start_ms\": 0, \"end_ms\": 1000, \"speaker\": null, \"text_cn\": \"你好\", \"text_vi\": \"Xin chào\", \"context_note\": \"\", \"status\": \"draft\"}]}",
             "OUTPUT FORMAT (INCORRECT — do NOT do this):",
             "  [{\"segment_id\": \"m-0001\", ...}]  (bare array, missing top-level object)",
             "  Wrapped in markdown fences or extra braces",
@@ -421,13 +436,20 @@ def _review_batch_for_length(
             "(make it shorter while preserving meaning and tone).",
             "For translations already within budget or under budget, return unchanged.",
             "Preserve segment_id and original meaning; only adjust text_vi for length.",
+            "Return ALL fields for each segment: segment_id, start_ms, end_ms, speaker, "
+            "text_cn, text_vi, context_note, status. (Required: start_ms and end_ms must be present.)",
             "Return JSON only with a top-level \"translations\" array.",
         ],
         "segments": [
             {
                 "segment_id": row.segment_id,
+                "start_ms": row.start_ms,
+                "end_ms": row.end_ms,
+                "speaker": row.speaker,
                 "text_cn": row.text_cn,
                 "text_vi": row.text_vi,
+                "context_note": row.context_note,
+                "status": row.status,
                 "target_vi_chars": _length_target_vi_chars(row.start_ms, row.end_ms),
             }
             for row in rows
