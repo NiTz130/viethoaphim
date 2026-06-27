@@ -5,7 +5,7 @@ from pathlib import Path
 from .models import TimedSegment
 
 
-REFERENCE_FILES = ["Names.txt", "Pronouns.txt", "VietPhrase.txt"]
+REFERENCE_FILES = ["Names.txt", "VietPhrase.txt"]
 
 
 def find_reference_data_dir(data_dir: Path) -> Path:

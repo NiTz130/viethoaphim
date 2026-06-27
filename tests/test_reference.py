@@ -35,7 +35,6 @@ def test_build_reference_context_includes_only_matching_entries(tmp_path):
 
     assert context == {
         "Names.txt": [],
-        "Pronouns.txt": [{"source": "\u4f60", "target": "ng\u01b0\u01a1i"}],
         "VietPhrase.txt": [{"source": "\u795e\u79d8", "target": "th\u1ea7n b\u00ed"}],
     }
 
