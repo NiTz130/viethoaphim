@@ -535,7 +535,9 @@ def test_translate_with_llm_passes_glossary_to_subsequent_batches(monkeypatch):
     sources = [t["source"] for t in second_payload.get("consistency_terms", [])]
     assert "长孙无忌" in sources
     targets = [t["target"] for t in second_payload.get("consistency_terms", [])]
-    assert "Trưởng Tôn" in targets
+    # Heuristic maps first N Chinese names to first N Vietnamese capitalized words.
+    # With vi_words = ["Trưởng", "Tôn", ...], only "Trưởng" is stored.
+    assert "Trưởng" in targets
 
 
 def test_cap_glossary_drops_oldest_entries():
