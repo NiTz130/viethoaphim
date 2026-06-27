@@ -267,11 +267,47 @@ def test_translation_examples_have_valid_format():
 
 def test_translate_pipeline_produces_valid_response():
     """Integration: new prompts don't break the existing parse path."""
-    from vietdub.translate import translate_with_llm
-    from vietdub.models import TimedSegment
-    from tests.test_translate_responses import _FakeAnthropic, _settings
     import sys
     import types
+
+    from vietdub.translate import translate_with_llm
+    from vietdub.models import TimedSegment
+
+    class _TextBlock:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.type = "text"
+
+    class _FakeMessages:
+        def create(self, **kwargs):
+            return types.SimpleNamespace(
+                content=[_TextBlock(json.dumps({
+                    "translations": [{
+                        "segment_id": "m-0001",
+                        "start_ms": 0,
+                        "end_ms": 1000,
+                        "speaker": None,
+                        "text_cn": "\u4f60\u597d",
+                        "text_vi": "Xin ch\u00e0o",
+                        "context_note": "",
+                        "status": "draft",
+                    }]
+                }))],
+                stop_reason="end_turn",
+            )
+
+    class _FakeAnthropic:
+        def __init__(self, **kwargs) -> None:
+            self.messages = _FakeMessages()
+
+    def _settings(**overrides):
+        base = {
+            "anthropic_api_key": "test-key",
+            "anthropic_base_url": "https://api.minimax.io/anthropic",
+            "llm_model": "MiniMax-M3",
+        }
+        base.update(overrides)
+        return types.SimpleNamespace(**base)
 
     monkey = pytest.MonkeyPatch()
     monkey.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_FakeAnthropic))
@@ -283,5 +319,5 @@ def test_translate_pipeline_produces_valid_response():
     )
 
     assert len(rows) == 1
-    assert rows[0].text_vi == "Xin ch\u00e0o"  # from _FakeMessages
+    assert rows[0].text_vi == "Xin ch\u00e0o"
     monkey.undo()
