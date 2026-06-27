@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 import sys
 import time
@@ -29,6 +30,9 @@ ALLOWED_REVIEW_STATUSES = {"draft", "reviewed", "skip"}
 
 _LEADING_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?")
 _TRAILING_FENCE_RE = re.compile(r"\n?```$")
+
+_CHINESE_NAME_RE = re.compile(r"[一-鿿]{2,4}")
+_MAX_GLOSSARY_ENTRIES = 50
 
 
 _EXAMPLES: list[dict] = [
@@ -150,7 +154,11 @@ def parse_translation_response(content: str) -> list[TranslationRow]:
     return rows
 
 
-def build_translation_prompt(segments: list[TimedSegment], context_bundle: dict) -> str:
+def build_translation_prompt(
+    segments: list[TimedSegment],
+    context_bundle: dict,
+    glossary: dict[str, str] | None = None,
+) -> str:
     payload = {
         "instructions": [
             "Return JSON only with a top-level \"translations\" array.",
@@ -159,12 +167,16 @@ def build_translation_prompt(segments: list[TimedSegment], context_bundle: dict)
             "Use a silly, meme-friendly tone when the source is comedic.",
             "Aim for the target_vi_chars characters shown per segment (Vietnamese ≈ 14 chars/sec + 10% buffer).",
             "Preserve names and pronouns using the supplied context.",
+            "Use the consistency_terms list below to translate recurring Chinese names consistently across batches.",
             "OUTPUT FORMAT (CORRECT): {\"translations\": [{\"segment_id\": \"m-0001\", \"text_vi\": \"...\", ...}]}",
             "OUTPUT FORMAT (INCORRECT — do NOT do this):",
             "  [{\"segment_id\": \"m-0001\", ...}]  (bare array, missing top-level object)",
             "  Wrapped in markdown fences or extra braces",
         ],
         "examples": _EXAMPLES,
+        "consistency_terms": [
+            {"source": cn, "target": vi} for cn, vi in (glossary or {}).items()
+        ],
         "context": context_bundle,
         "segments": [
             {**segment.model_dump(), "target_vi_chars": _length_target_vi_chars(segment.start_ms, segment.end_ms)}
@@ -219,17 +231,81 @@ def translate_with_llm(
             file=sys.stderr,
         )
 
+    glossary: dict[str, str] = dict(_load_initial_glossary())
+
     all_rows: list[TranslationRow] = []
     for start in range(0, len(segments), LLM_BATCH_SIZE):
         batch = segments[start:start + LLM_BATCH_SIZE]
-        all_rows.extend(_translate_one_batch_with_retry(batch, context_bundle, settings))
+        rows = _translate_one_batch_with_retry(batch, context_bundle, settings, glossary=glossary)
+        all_rows.extend(rows)
+        _update_glossary(glossary, rows, batch)
+        _cap_glossary(glossary)
+
     return all_rows
+
+
+def _load_initial_glossary() -> dict[str, str]:
+    """Load initial name glossary from reference data (Names.txt).
+
+    Format: whitespace-separated 'cn_name vi_name' pairs, one per line.
+    Skips empty lines and lines starting with '#'. Returns empty dict
+    if the file is missing or unreadable.
+    """
+    glossary: dict[str, str] = {}
+    try:
+        ref_dir = Path(os.environ.get("REFERENCE_DATA_DIR", "data"))
+        names_file = ref_dir / "Names.txt"
+        if names_file.exists():
+            for line in names_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) == 2:
+                    glossary[parts[0]] = parts[1]
+    except Exception:
+        pass
+    return glossary
+
+
+def _update_glossary(
+    glossary: dict[str, str],
+    rows: list[TranslationRow],
+    batch: list[TimedSegment],
+) -> None:
+    """Extract name_cn → name_vi pairs from completed batch and merge into glossary.
+
+    Heuristic: for each segment, find Chinese name runs (2-4 CJK chars) and
+    align them positionally with capitalized Vietnamese words.
+    """
+    for row, seg in zip(rows, batch):
+        cn_names = _CHINESE_NAME_RE.findall(seg.text)
+        if not cn_names:
+            continue
+        vi_words = row.text_vi.split()
+        for i, cn_name in enumerate(cn_names):
+            if i >= len(vi_words):
+                break
+            vi_word = vi_words[i].strip(".,!?;:")
+            if len(vi_word) >= 2 and vi_word[0].isupper():
+                glossary[cn_name] = vi_word
+
+
+def _cap_glossary(
+    glossary: dict[str, str],
+    max_entries: int = _MAX_GLOSSARY_ENTRIES,
+) -> None:
+    """Cap glossary to max_entries by dropping oldest entries (FIFO)."""
+    while len(glossary) > max_entries:
+        oldest_key = next(iter(glossary))
+        del glossary[oldest_key]
 
 
 def _translate_one_batch(
     segments: list[TimedSegment],
     context_bundle: dict,
     settings,
+    glossary: dict[str, str] | None = None,
 ) -> list[TranslationRow]:
     import anthropic
 
@@ -249,7 +325,7 @@ def _translate_one_batch(
         "- Honor 'translation, not transliteration' — convey meaning, not sounds\n\n"
         "Return JSON only with a top-level 'translations' array."
     )
-    user_prompt = build_translation_prompt(segments, context_bundle)
+    user_prompt = build_translation_prompt(segments, context_bundle, glossary=glossary)
 
     try:
         response = client.messages.create(
@@ -290,6 +366,7 @@ def _translate_one_batch_with_retry(
     segments: list[TimedSegment],
     context_bundle: dict,
     settings,
+    glossary: dict[str, str] | None = None,
 ) -> list[TranslationRow]:
     """Call _translate_one_batch with exponential-backoff retry on transient errors.
 
@@ -311,7 +388,7 @@ def _translate_one_batch_with_retry(
     last_exc: Exception | None = None
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
-            return _translate_one_batch(segments, context_bundle, settings)
+            return _translate_one_batch(segments, context_bundle, settings, glossary=glossary)
         except api_connection_error as exc:
             last_exc = exc
             if attempt == LLM_MAX_RETRIES:

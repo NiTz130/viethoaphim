@@ -423,3 +423,144 @@ def test_parse_translation_response_skips_length_check_for_very_short_segments(c
     assert len(rows) == 1
     captured = capsys.readouterr()
     assert "[LEN WARNING]" not in captured.err
+
+
+def test_extract_terms_from_translations_finds_chinese_names():
+    """Heuristic extracts Chinese names → Vietnamese capitalized words."""
+    from vietdub.translate import _update_glossary
+    from vietdub.models import TranslationRow
+
+    rows = [
+        TranslationRow(
+            segment_id="m-0001", start_ms=0, end_ms=1000, speaker=None,
+            text_cn="长孙无忌 is here", text_vi="Trưởng Tôn đang ở đây",
+            context_note="", status="draft",
+        )
+    ]
+    batch = [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="长孙无忌 is here")]
+    glossary: dict = {}
+    _update_glossary(glossary, rows, batch)
+    assert "长孙无忌" in glossary
+    assert glossary["长孙无忌"] == "Trưởng"
+
+
+def test_extract_terms_from_translations_skips_non_capitalized():
+    """Lowercase Vietnamese words don't get added to glossary."""
+    from vietdub.translate import _update_glossary
+    from vietdub.models import TranslationRow
+
+    rows = [
+        TranslationRow(
+            segment_id="m-0001", start_ms=0, end_ms=1000, speaker=None,
+            text_cn="你好世界", text_vi="xin chào bạn",
+            context_note="", status="draft",
+        )
+    ]
+    batch = [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="你好世界")]
+    glossary: dict = {}
+    _update_glossary(glossary, rows, batch)
+    assert glossary == {}
+
+
+def test_translate_with_llm_passes_glossary_to_subsequent_batches(monkeypatch):
+    """Glossary accumulates across batches and is passed forward."""
+    import sys
+    import types
+
+    captured_prompts: list = []
+
+    class _TextBlock:
+        def __init__(self, text):
+            self.text = text
+            self.type = "text"
+
+    class _CapturingMessages:
+        """Returns a different translation each call to simulate cross-batch evolution."""
+        def __init__(self):
+            self.call_count = 0
+
+        def create(self, **kwargs):
+            captured_prompts.append(kwargs["messages"][0]["content"])
+            self.call_count += 1
+            # First call returns 1 row with Chinese name "Trưởng"
+            # Second call returns 1 row with Chinese name "Trưởng" again (consistency check)
+            return types.SimpleNamespace(
+                content=[_TextBlock(json.dumps({
+                    "translations": [{
+                        "segment_id": f"m-{self.call_count:04d}",
+                        "start_ms": 0,
+                        "end_ms": 1000,
+                        "speaker": None,
+                        "text_cn": "长孙无忌",
+                        "text_vi": "Trưởng Tôn",
+                        "context_note": "",
+                        "status": "draft",
+                    }]
+                }))],
+                stop_reason="end_turn",
+            )
+
+    class _CapturingAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = _CapturingMessages()
+
+    monkeypatch.setitem(sys.modules, "anthropic",
+                        types.SimpleNamespace(Anthropic=_CapturingAnthropic))
+
+    settings = types.SimpleNamespace(
+        anthropic_api_key="test-key",
+        anthropic_base_url="https://api.minimax.io/anthropic",
+        llm_model="MiniMax-M3",
+    )
+
+    segments = [
+        TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="长孙无忌"),
+        TimedSegment(id="m-0002", start_ms=0, end_ms=1000, text="长孙无忌"),
+    ]
+    # With LLM_BATCH_SIZE=50, both fit in one batch. To force 2 batches,
+    # we patch LLM_BATCH_SIZE temporarily.
+    import vietdub.translate as t
+    original_batch_size = t.LLM_BATCH_SIZE
+    t.LLM_BATCH_SIZE = 1
+    try:
+        translate_with_llm(segments=segments, context_bundle={}, settings=settings)
+    finally:
+        t.LLM_BATCH_SIZE = original_batch_size
+
+    assert len(captured_prompts) == 2
+    # First batch's prompt: empty consistency_terms (glossary starts empty if Names.txt absent)
+    first_payload = json.loads(captured_prompts[0])
+    second_payload = json.loads(captured_prompts[1])
+    # Second batch's prompt should include the glossary entry from batch 1
+    sources = [t["source"] for t in second_payload.get("consistency_terms", [])]
+    assert "长孙无忌" in sources
+    targets = [t["target"] for t in second_payload.get("consistency_terms", [])]
+    assert "Trưởng Tôn" in targets
+
+
+def test_cap_glossary_drops_oldest_entries():
+    """When glossary exceeds 50 entries, oldest are dropped FIFO."""
+    from vietdub.translate import _cap_glossary
+
+    glossary = {f"name_{i}": f"translation_{i}" for i in range(60)}
+    _cap_glossary(glossary, max_entries=50)
+    assert len(glossary) == 50
+    assert "name_0" not in glossary  # oldest dropped
+    assert "name_59" in glossary    # newest kept
+
+
+def test_build_translation_prompt_includes_consistency_terms():
+    """build_translation_prompt includes glossary as consistency_terms."""
+    glossary = {"长孙无忌": "Trưởng Tôn"}
+    prompt_json = build_translation_prompt(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="test")],
+        context_bundle={},
+        glossary=glossary,
+    )
+    payload = json.loads(prompt_json)
+    assert "consistency_terms" in payload
+    assert {"source": "长孙无忌", "target": "Trưởng Tôn"} in payload["consistency_terms"]
+
+
+# Import translate_with_llm at module scope (used by test_translate_with_llm_passes_glossary_to_subsequent_batches)
+from vietdub.translate import translate_with_llm  # noqa: E402
