@@ -66,7 +66,7 @@ _LENGTH_TOLERANCE = 0.20  # ±20% of target_vi_chars
 def _warn_oversized_translations(rows: list[TranslationRow]) -> None:
     """Warn if Vietnamese translation length is outside ±20% of target.
 
-    Skips empty translations and segments in the floor region (target < 10).
+    Skips empty translations and segments in the floor region (target <= 10).
     Warnings go to stderr with [LEN WARNING] prefix for easy filtering.
     """
     for row in rows:
