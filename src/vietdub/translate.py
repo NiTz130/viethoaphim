@@ -108,7 +108,27 @@ def _strip_markdown_fences(content: str) -> str:
     return stripped.strip()
 
 
-def parse_translation_response(content: str) -> list[TranslationRow]:
+def parse_translation_response(
+    content: str,
+    warn_oversized: bool = True,
+) -> list[TranslationRow]:
+    """Parse the LLM's JSON translation response into TranslationRow objects.
+
+    Parameters
+    ----------
+    content:
+        Raw response text from the LLM (may be wrapped in markdown fences).
+    warn_oversized:
+        If True (default), emit ``[LEN WARNING]`` lines to stderr for any
+        translations that exceed ``target_vi_chars``. Set False when parsing
+        the LLM's own review/refinement output, since warnings on the
+        LLM's attempted fix would just be noise.
+
+    Returns
+    -------
+    list[TranslationRow]
+        Validated rows parsed from the JSON payload.
+    """
     try:
         data = json.loads(content)
     except JSONDecodeError as exc_raw:
@@ -150,7 +170,8 @@ def parse_translation_response(content: str) -> list[TranslationRow]:
                 f"(segment_id={item.get('segment_id', '?')!r}) failed validation: {exc}"
             ) from exc
 
-    _warn_oversized_translations(rows)
+    if warn_oversized:
+        _warn_oversized_translations(rows)
 
     return rows
 
@@ -370,7 +391,7 @@ def _review_batch_for_length(
     if not text_parts:
         raise RuntimeError("MiniMax review returned empty response (no text content blocks)")
     content = "".join(text_parts)
-    refined_rows = parse_translation_response(content)
+    refined_rows = parse_translation_response(content, warn_oversized=False)
 
     refined_map: dict[str, str] = {r.segment_id: r.text_vi for r in refined_rows}
 
