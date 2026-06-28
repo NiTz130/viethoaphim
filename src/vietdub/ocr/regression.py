@@ -95,3 +95,66 @@ def compute_metrics(
         "text_similarity": round(sim_mean, 4),
         "unmatched_pct": round(unmatched_pct, 2),
     }
+
+
+def passes_thresholds(metrics: dict, thresholds: dict) -> bool:
+    """Return True if all SCORED metrics satisfy their threshold."""
+    checks = [
+        metrics["segment_count"]["delta_pct"] <= thresholds["segment_count_pct_max"],
+        metrics["mean_text_length"]["delta_pct"] <= thresholds["text_length_pct_max"],
+        metrics["time_range_overlap"] >= thresholds["iou_min"],
+        metrics["text_similarity"] >= thresholds["text_similarity_min"],
+    ]
+    return all(checks)
+
+
+def build_report(
+    baseline_path: str,
+    new_path: str,
+    baseline: list[OcrSegment],
+    new: list[OcrSegment],
+    metrics: dict,
+    thresholds: dict,
+    matches: list[tuple[str, str]],
+    top_n: int = 10,
+) -> dict:
+    """Build the JSON-serialisable diff report matching the spec §Output JSON schema."""
+    base_by_id = {s.id: s for s in baseline}
+    new_by_id = {s.id: s for s in new}
+    matched_new = {n for _, n in matches}
+    matched_base = {b for b, _ in matches}
+
+    # top-N diff segments by lowest text similarity
+    diffs = []
+    for b, n in matches:
+        sim = SequenceMatcher(None, base_by_id[b].text, new_by_id[n].text).ratio()
+        diffs.append((sim, b, n))
+    diffs.sort()
+    top_10 = [
+        {
+            "baseline_id": b,
+            "new_id": n,
+            "similarity": round(sim, 4),
+            "baseline_text": base_by_id[b].text,
+            "new_text": new_by_id[n].text,
+        }
+        for sim, b, n in diffs[:top_n]
+    ]
+
+    return {
+        "baseline_path": baseline_path,
+        "new_path": new_path,
+        "metrics": metrics,
+        "thresholds": {
+            "segment_count_pct_max": thresholds["segment_count_pct_max"],
+            "text_length_pct_max": thresholds["text_length_pct_max"],
+            "iou_min": thresholds["iou_min"],
+            "text_similarity_min": thresholds["text_similarity_min"],
+        },
+        "passed": passes_thresholds(metrics, thresholds),
+        "top_10_diff_segments": top_10,
+        "unmatched": {
+            "baseline_ids": sorted(set(s.id for s in baseline) - matched_base),
+            "new_ids": sorted(set(s.id for s in new) - matched_new),
+        },
+    }

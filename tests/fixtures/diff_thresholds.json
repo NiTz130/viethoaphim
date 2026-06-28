@@ -1,0 +1,6 @@
+{
+  "segment_count_pct_max": 5,
+  "text_length_pct_max": 10,
+  "iou_min": 0.95,
+  "text_similarity_min": 0.85
+}
