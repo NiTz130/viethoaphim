@@ -232,3 +232,22 @@ make ocr-baseline CONFIRM=overwrite   # overwrite baseline (rare; needs review)
 The harness computes 5 metrics (segment count delta, mean text length delta, time-range IoU, text similarity, unmatched %). SCORED thresholds are in `tests/fixtures/diff_thresholds.json`; the unmatched_pct metric is informational.
 
 Exit codes: `0` pass, `1` regression (block PR), `2` missing input, `3` OCR raised, `5` env broken.
+
+### Rollback
+
+Nếu gặp regression sau cutover NumPy 2.x / paddlepaddle 3.x:
+
+```powershell
+git revert bcfc258                 # khôi phục pyproject.toml (pins ML stack) + requirements-ocr.txt (shim)
+Remove-Item -Recurse -Force .venv, .venv-2026
+pip uninstall vietdub -y           # nếu đã pip install -e . trước đó
+.\setup.ps1                        # bootstrap lại với stack cũ
+```
+
+Hoặc nếu muốn pin tạm thời không revert:
+
+```powershell
+pip install "numpy<2" "paddlepaddle<3"
+```
+
+Sau khi soak ≥3 ngày không có vấn đề, commit 3b sẽ xóa `requirements-ocr.txt` shim.
