@@ -15,7 +15,7 @@ A module that was compiled using NumPy 1.x cannot be run in NumPy 2.4.6 as it ma
 
 The previous "Tập 1-3" job (2026-06-27) succeeded when NumPy <2 was installed. The bug surfaced again on 2026-06-29 when running "Tập 1-5".
 
-**Goal:** Migrate to a modern stack (`numpy>=2.0,<3`, `paddlepaddle>=3.0,<4`, `torch>=2.6,<3`) with structural OCR regression verification, while preserving the option to roll back.
+**Goal:** Migrate to a modern stack (`numpy>=2.0,<2.4`, `paddlepaddle>=3.0,<4`, `torch>=2.6,<3`) with structural OCR regression verification, while preserving the option to roll back. The numpy upper bound `<2.4` is pinned because the original crash occurred against NumPy 2.4.6; pinning below that version prevents ABI drift back into the known-broken range.
 
 ## Architecture Overview
 
@@ -67,7 +67,7 @@ The system is organized into three independent layers:
 **Acceptance criteria:**
 - `make ocr-diff` succeeds against the current (un-upgraded) stack.
 - Diff report prints as a table to stdout and writes JSON.
-- Self-regression test passes (delta = 0 when baseline = current run).
+- Self-regression test passes with realistic determinism thresholds: `segment_count_delta_pct <= 1` AND `text_similarity >= 0.98` when baseline = current run on the same hardware. PaddleOCR is non-deterministic across runs (model precision, thread count, batch order), so "delta = 0" is not achievable. A separate `tests/test_paddleocr_determinism.py` investigation test must validate acceptable run-to-run variance BEFORE Phase 1 is considered complete.
 
 **Rollback:** Delete `tests/ocr_regression.py`, `tests/fixtures/*`, Makefile targets, README section. Source code unchanged.
 
@@ -76,13 +76,14 @@ The system is organized into three independent layers:
 **Goal:** Verify that upgrading to `paddlepaddle>=3.0,<4` + `numpy>=2.0,<3` + `torch>=2.6,<3` does not break OCR quality.
 
 **Deliverables:**
-- `requirements-2026.txt` — new file with soft pins:
+- `requirements-2026.txt` — new file with bounded compatibility-range pins (not soft floors — each pin has both a floor and a ceiling):
   ```
   paddlepaddle>=3.0,<4
-  onnxruntime>=1.18
+  onnxruntime>=1.18,<1.20
   torch>=2.6,<3
-  numpy>=2.0,<3
+  numpy>=2.0,<2.4
   ```
+  The numpy upper bound is pinned to `<2.4` to keep the resolver out of the known-broken 2.4.x range. Run `pip install --dry-run -r requirements-2026.txt` in CI and treat resolver conflicts as a build failure.
 - `tests/ocr_regression_2026.py` — variant that runs in a separate `venv-2026` directory.
 - `docs/ocr-upgrade-2026-results.md` — recorded diff report and conclusion (acceptable vs. regression).
 - `Makefile` — new target `ocr-diff-2026`.
@@ -106,23 +107,36 @@ The system is organized into three independent layers:
   - Exact pins only for protobuf (paddlepaddle 3.x hard-requires `protobuf>=4.25,<6`).
 - `requirements-ocr.txt` — **deleted** (merged into `requirements.txt`).
 - `setup.ps1` — idempotent bootstrap:
-  1. Check Python version (3.11 only; paddlepaddle 3.x does not yet support 3.13).
-  2. Create `.venv/` if missing.
-  3. Upgrade pip.
-  4. Install `requirements.txt`.
-  5. Print activation instructions.
+  1. Check Python version. Accept `>=3.9,<3.14` (paddlepaddle 3.x publishes wheels for cp39–cp313). Use `py -3.X` launcher (not `python`, which on Windows may point to the Microsoft Store stub). If the resolved interpreter is under `WindowsApps`, print instructions to disable the App Execution Alias.
+  2. Check architecture: refuse to proceed unless `platform.machine()` is `AMD64` (paddlepaddle 3.x Windows wheels are amd64-only).
+  3. Check VC++ runtime: run `python -c "import ctypes; ctypes.CDLL('vcruntime140.dll'); ctypes.CDLL('msvcp140.dll')"`. If missing, print the Microsoft VC++ 2019/2022 redistributable download URL and exit.
+  4. Record the installed stack into `build/installed-stack.txt` (hash of requirements.txt + pip freeze). On re-run, if the hash matches, skip install; otherwise nuke `.venv/` and recreate.
+  5. Create `.venv/` if missing (or if previous hash mismatched).
+  6. Upgrade pip only if its version is below the minimum required (`--upgrade-strategy only-if-needed`).
+  7. Install `requirements.txt`. After every native command, check `$LASTEXITCODE -ne 0` and throw (PowerShell 5.1 does not propagate `$ErrorActionPreference='Stop'` to native exes).
+  8. Warn if `$PSVersionTable.PSVersion -lt 7` (PowerShell 7+ recommended; 5.1 has weaker error propagation).
+  9. Print shell-specific activation instructions (PowerShell: `.\\.venv\\Scripts\\Activate.ps1`; cmd: `.venv\\Scripts\\activate.bat`; bash: `source .venv/bin/activate`).
 - `Makefile` — extended targets:
   - `setup` — wraps `setup.ps1` on Windows or creates `.venv` + pip install on Linux.
   - `venv`, `clean`, `test`, `lint`, `ocr-diff`, `ocr-diff-2026` (kept from earlier phases).
 - `README.md` — "Setup" section rewritten as a single command: `.\setup.ps1`.
 
 **Acceptance criteria:**
-- `./setup.ps1` on a clean machine → `vietdub run --help` works with the new stack.
-- `make setup` produces the same result on Linux/CI.
-- `vietdub run` end-to-end on `C:\code\test\Tập 1.mp4` produces a `review.csv` with no errors.
-- `make ocr-diff` runs against the new stack; diff within thresholds.
+- `.\setup.ps1` on a clean machine (Windows 11, PowerShell 5.1+, no prior `.venv/`, fresh git clone) → `vietdub run --help` returns exit code 0 with no `ERROR`-level log lines in `build/setup-*.log`. Per-step assertions: after step 5, `.venv/` exists; after step 7, `pip show paddlepaddle` reports a version in `[3.0, 4)`.
+- `make setup` produces the same pip freeze on Linux/CI (Ubuntu 22.04+, Python 3.11).
+- `vietdub run` end-to-end on `tests/fixtures/sample.mp4` (committed ASCII-named fixture, not `C:\code\test\Tập 1.mp4`) → exit code 0, no `ERROR`-level log lines, `review.csv` row count within ±N% of the golden row count (`tests/fixtures/golden_review_row_count.txt`), all `status.json` steps = `done`. The Windows-specific smoke test on `C:\code\test\Tập 1.mp4` is documented as a manual local-only check, NOT a CI acceptance criterion.
+- `make ocr-diff` runs against the new stack; all four SCORED metrics (segment_count_delta_pct, mean_text_length_delta_pct, time_range_overlap, text_similarity) within thresholds. `top_10_diff_segments` is informational only and does not gate pass/fail.
 
-**Rollback:** `git revert` of the Phase 3 commit. Old stack remains in git history.
+**Rollback:**
+1. `git revert <phase-3-sha>` — restores `requirements.txt` and any deleted files (see sequencing note below).
+2. `Remove-Item -Recurse -Force .venv` and `Remove-Item -Recurse -Force .venv-2026` (PowerShell) / `rm -rf .venv .venv-2026` (bash).
+3. `py -3.11 -m venv .venv && .\\.venv\\Scripts\\python.exe -m pip install -r requirements.txt` to reinstall the old stack.
+
+**Sequencing note:** `requirements-ocr.txt` deletion and the `requirements.txt` rewrite MUST land in two separate commits to keep `git revert` self-contained:
+- Commit 3a: copy `requirements-ocr.txt` content into `requirements.txt` while keeping `requirements-ocr.txt` as a re-export shim (`-r requirements.txt` + a "DEPRECATED" comment).
+- Commit 3b (after ≥3 days soak): delete the shim.
+
+Before 3b, run `git grep requirements-ocr` to surface any remaining references in README, Dockerfiles, or CI workflows.
 
 ## Data Flow: OCR Regression Test
 
@@ -145,7 +159,7 @@ The system is organized into three independent layers:
   .json (608 segs)
 ```
 
-**Step 1 — Load baseline:** Parse baseline JSON into `list[OcrSegment]` with schema `{id, start_ms, end_ms, text, confidence}`.
+**Step 1 — Load baseline:** Parse baseline JSON into `list[OcrSegment]`. Schema is enforced via pydantic models in `src/vietdub/ocr/schema.py`: `{id: str, start_ms: int >= 0, end_ms: int >= start_ms, text: str, confidence: float in [0,1]?}`. `confidence` is optional and not used by any diff metric in Step 3 (carried only for diagnostic logging). Segments are sorted by `start_ms` ascending before matching. Malformed segments raise `OcrSegmentError` and abort the run (do not silently skip).
 
 **Step 2 — Run OCR:** Call `PaddleOCREngine.recognize(video_path, region="bottom_28pct")` (existing API). Output uses the same schema.
 
@@ -155,11 +169,11 @@ The system is organized into three independent layers:
 |--------|---------|-----------|
 | `segment_count_delta_pct` | `abs(new_count - baseline_count) / baseline_count * 100` | ≤ 5 |
 | `mean_text_length_delta_pct` | `abs(new_mean - baseline_mean) / baseline_mean * 100` | ≤ 10 |
-| `time_range_overlap` | IoU of union time ranges | ≥ 0.95 |
+| `time_range_overlap` | mean pairwise IoU of MATCHED pairs: `mean over matched (intersection_len / union_len)` | ≥ 0.95 |
 | `text_similarity` | mean of `difflib.SequenceMatcher.ratio()` for matched pairs | ≥ 0.85 |
 | `top_10_diff_segments` | segments with lowest text_similarity | (report only) |
 
-**Matching algorithm:** Greedy match by closest `(start_ms + end_ms) / 2`, threshold ±200 ms. Unmatched segments accumulate in `unmatched_baseline_ids` and `unmatched_new_ids`.
+**Matching algorithm:** Sort both lists by midpoint ascending before matching. Greedy match by closest midpoint, threshold ±200 ms. Tie-breaking: ascending `baseline.id` first, then smallest midpoint distance. Zero-width or negative-duration segments are excluded from matching. Unmatched segments accumulate in `unmatched.baseline_ids` and `unmatched.new_ids`. A fifth diagnostic metric `unmatched_pct = (unmatched_count / max(baseline_count, new_count)) * 100` is reported (informational; no threshold by default).
 
 **Output JSON schema:**
 ```json
@@ -179,7 +193,16 @@ The system is organized into three independent layers:
 }
 ```
 
-**Exit codes:** `0` if `passed=true`, `1` if any metric fails threshold, `2` if baseline/input missing, `3` if PaddleOCR raises.
+**Exit codes:**
+
+| Code | Meaning | Writes partial JSON? | CI action |
+|------|---------|----------------------|-----------|
+| 0 | `passed=true`, all SCORED metrics within thresholds | No (full report written) | Pass |
+| 1 | Any scored metric failed threshold (regression) | Yes (full report at `tests/fixtures/ocr_diff_report.json`) | Block PR |
+| 2 | Baseline or input file missing | No | Page on-call (infra) |
+| 3 | PaddleOCR raised during run | Yes (partial at `tests/fixtures/ocr_run_partial.json`) | Page on-call (infra) |
+| 4 | `requirements-2026.txt` install failed (Phase 2 only) | No | Page on-call (infra) |
+| 5 | Environment broken (venv missing, module not importable, missing fixture video) | No | Page on-call (infra) |
 
 ## Error Handling
 
@@ -200,9 +223,9 @@ The system is organized into three independent layers:
 - **OCR quality regression detected post-cutover** → rollback per Phase 3 docs. Note in CHANGELOG that downgrade to numpy<2 stack is supported via git checkout.
 
 ### Cross-cutting
-- All scripts use `$ErrorActionPreference='Stop'` (PowerShell) / `set -euo pipefail` (bash) so any failure halts immediately.
-- All scripts are idempotent — running twice gives the same state (no double-install, no orphan venvs).
-- All scripts log to `build/setup-<date>.log` for postmortem.
+- All scripts use `$ErrorActionPreference='Stop'` (PowerShell) / `set -euo pipefail` (bash). On PowerShell 5.1 this does NOT propagate to native commands, so `setup.ps1` MUST follow every native invocation with `if ($LASTEXITCODE -ne 0) { throw "<cmd> failed with exit $LASTEXITCODE" }`. PowerShell 7+ (`pwsh`) is recommended; the script warns if `$PSVersionTable.PSVersion -lt 7`.
+- Idempotency contract: see `setup.ps1` step 4 above. A re-run after a successful run produces the same `pip freeze` output. Re-runs are NOT skipped — pip install is re-invoked — but the end state is stable. Partial-failure detection via `build/installed-stack.txt` triggers nuke-and-recreate.
+- All scripts log to `build/setup-yyyyMMdd-HHmmss-<pid>.log` (PowerShell: `Get-Date -Format 'yyyyMMdd-HHmmss'`). At the top of `setup.ps1`, prune logs older than 7 days. Use `Tee-Object` to mirror to stdout so the user sees progress live.
 
 ## Testing
 
@@ -223,8 +246,8 @@ The system is organized into three independent layers:
 
 ### OCR regression tests
 
-- `tests/test_ocr_regression.py::test_self_regression` — runs OCR diff against the SAME stack (baseline = current run). Must pass with delta = 0.
-- `tests/test_ocr_regression.py::test_fixtures_present` — asserts `tests/fixtures/ocr_diff_report.json` exists.
+- `tests/test_ocr_regression.py::test_self_regression` — runs OCR diff against the SAME stack (baseline = current run). Must pass with `segment_count_delta_pct <= 1` and `text_similarity >= 0.98`. The self-regression loop copies the current run's output to `tests/.tmp/self_regression_baseline.json`, re-runs OCR, diffs against the tmpdir baseline, then cleans up. Does NOT pollute checked-in fixtures.
+- `tests/test_ocr_regression.py::test_fixtures_present` — FAILS (not skips) if `tests/fixtures/ocr_diff_report.json` is missing, with an actionable error instructing the maintainer to run `make ocr-baseline CONFIRM=overwrite` on a known-good run.
 
 ### Manual smoke test (documented in README)
 
@@ -235,11 +258,12 @@ vietdub inspect jobs\smoke-test
 # Expect: extract, stt, ocr, merge, context, translate all "done"
 ```
 
-### CI
+### CI (delivered as part of Phase 3)
 
-- `make test` → unit tests + self-regression (fast, ~30 s).
-- `make test-integration` → full pipeline on sample (~25 min, nightly only).
-- `make ocr-diff` → regression check on every PR (gated on `tests/fixtures/ocr_diff_report.json` existing).
+CI infrastructure is added as an explicit Phase 3 deliverable, not assumed:
+- `.github/workflows/test.yml` — runs `make test` on every PR. Runner: `windows-latest` + `ubuntu-latest`. Caches `~/.cache/pip` keyed on `requirements.txt` hash.
+- `.github/workflows/integration.yml` — runs `make test-integration` nightly + on `main` merges. ~25 min; uses `windows-latest` with paddlepaddle cached. Failure retries once to distinguish flakes from real regressions.
+- `.github/workflows/ocr-diff.yml` — runs `make ocr-diff` on every PR. FAILS (does not skip) if the golden baseline is missing. Updating the baseline requires a dedicated PR titled `chore: update ocr baseline` reviewed by a maintainer.
 
 ### Coverage targets
 
@@ -249,17 +273,30 @@ vietdub inspect jobs\smoke-test
 ## Pinning Strategy
 
 Hybrid:
-- **Soft floor pins** in `requirements.txt` for `torch`, `numpy`, `paddlepaddle`, `faster-whisper`, `paddleocr`, `onnxruntime` (e.g., `torch>=2.6,<3`).
-- **Exact pins** only where a hard ABI constraint exists (e.g., `protobuf>=4.25,<6` required by paddlepaddle 3.x).
-- Soft pins let `pip` resolve within range while still preventing silent major-version drift.
+- **Bounded compatibility-range pins** in `requirements.txt` for `torch`, `numpy`, `paddlepaddle`, `faster-whisper`, `paddleocr`, `onnxruntime`. Each pin has both a floor and a ceiling (e.g., `torch>=2.6,<3`). The ceiling is mandatory and is what distinguishes these from floor-only pins.
+- **ABI-constrained ranges** where a hard ABI relationship exists (e.g., a protobuf range dictated by paddlepaddle 3.x). These are still ranges, not exact pins.
+- Compatibility ranges let `pip` resolve within range while preventing both major-version drift (floor) and silent regression into known-broken versions (ceiling). The numpy ceiling `<2.4` is set because the original crash occurred against `numpy==2.4.6`; the resolver must not be allowed to pick that version.
+
+Glossary:
+- **Compatibility range** — `>=X,<Y` with both bounds. Prevents drift in either direction.
+- **Floor-only pin** — `>=X` only. Allows any newer version (use sparingly; ABI risk).
+- **ABI-constrained range** — compatibility range dictated by a dependency's hard requirement; may shift across releases.
+- **Exact pin** — `==X.Y.Z`. Use only for packages whose ABI changes on patch versions.
 
 ## Out of Scope
 
-- Upgrading Python from 3.11 to 3.13 (paddlepaddle 3.x doesn't yet support 3.13).
+- Upgrading the team default Python to a version outside the `[3.9, 3.13)` window — paddlepaddle 3.x DOES publish cp39–cp313 wheels (verified against the 3.3.1 release, March 2026), so the prior exclusion was incorrect. A future migration to Python 3.14+ will require re-validating paddlepaddle wheel availability and rebuilding CI images.
 - Migrating to a faster-whisper alternative (e.g., whisperX).
-- GPU detection and CUDA auto-configuration.
-- Replacing the OCStep output schema.
+- GPU detection and CUDA auto-configuration. Note: on Windows, the default `paddlepaddle` install is CPU-only. Developers with NVIDIA GPUs who want acceleration must follow `docs/gpu-setup.md` (out of scope here).
+- Replacing the OcrStep output schema.
+- Adding a CHANGELOG.md file (delivered in Phase 3) — format and template TBD.
 
-## Open Questions
+## Open Questions (resolved before Phase 3 ships)
 
-None at draft time.
+- **OcrSegment schema contract** — finalized in `src/vietdub/ocr/schema.py`; see Step 1 above.
+- **PaddleOCR determinism** — investigated via `tests/test_paddleocr_determinism.py`; acceptable thresholds documented.
+- **CI infrastructure** — `.github/workflows/*.yml` added as Phase 3 deliverables (see CI section).
+- **Baseline-update process** — dedicated PR convention `chore: update ocr baseline` with maintainer review.
+- **Fixture video source** — committed as `tests/fixtures/sample.mp4` (≤10 MB, ASCII-named).
+- **`requirements-2026.txt` final pin ranges** — onnxruntime narrowed to `<1.20`; numpy narrowed to `<2.4`; faster-whisper pinned to a known-compatible version after Phase 2 validation.
+- **CHANGELOG.md format** — TBD by Phase 3 implementation.
