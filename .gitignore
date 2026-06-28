@@ -5,3 +5,5 @@ __pycache__/
 jobs/
 src/*.egg-info/
 .worktrees/
+build/installed-stack*.txt
+build/*.log
