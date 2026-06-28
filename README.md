@@ -33,14 +33,37 @@ ffprobe -version
 
 ## Cài Đặt
 
+### Windows (PowerShell)
+
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev]"
+.\setup.ps1
 ```
 
-Nếu PaddleOCR hoặc faster-whisper cần tải model lần đầu, lần chạy đầu tiên có thể chậm hơn bình thường.
+`setup.ps1` checks Python 3.11+, AMD64 architecture, and VC++ 2019/2022 runtime, then creates `.venv/` and installs dependencies. Re-running is a no-op if `requirements.txt` hasn't changed.
+
+### Linux / macOS / CI
+
+```bash
+make setup
+```
+
+Creates `.venv/` and installs from `requirements.txt`.
+
+### Sau khi cài
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+vietdub run .\sample.mp4 --mode review --series sample-series
+```
+
+### Bootstrap từ scratch
+
+Nếu `.venv/` bị hỏng hoặc `requirements.txt` thay đổi:
+
+```powershell
+Remove-Item -Recurse -Force .venv
+.\setup.ps1
+```
 
 ## Cấu Hình
 
