@@ -1,4 +1,4 @@
-.PHONY: setup bootstrap ocr-diff ocr-baseline test lint clean help venv-2026 ocr-diff-2026 test-integration
+.PHONY: setup bootstrap ocr-diff ocr-baseline test test-ocr lint clean help venv-2026 ocr-diff-2026 test-integration
 
 # Cross-platform setup dispatch
 ifeq ($(OS),Windows_NT)
@@ -44,7 +44,11 @@ ocr-baseline:
 	@echo "Overwriting baseline at $(BASELINE)"
 
 test:
-	pytest tests/test_ocr_schema.py tests/test_ocr_regression_metrics.py \
+	python3.11 -m pytest tests/ -v -m "not integration"
+
+# Phase 1 OCR regression subset — fast loop for harness development.
+test-ocr:
+	python3.11 -m pytest tests/test_ocr_schema.py tests/test_ocr_regression_metrics.py \
 	       tests/test_diff_thresholds.py tests/test_ocr_bridge.py \
 	       tests/test_ocr_regression.py -v
 
@@ -81,4 +85,4 @@ ocr-diff-2026:
 		--thresholds "$(THRESH)"
 
 test-integration:
-	pytest tests/integration/ -v -m integration
+	python3.11 -m pytest tests/integration/ -v -m integration
