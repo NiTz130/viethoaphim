@@ -1,0 +1,8 @@
+# Bounded compatibility-range pins for the NumPy 2.x / paddlepaddle 3.x test stack.
+# Ceilings are mandatory — they prevent drift into known-broken versions.
+# See docs/superpowers/specs/2026-06-29-numpy-stack-upgrade-design.md
+paddlepaddle>=3.0,<4
+onnxruntime>=1.18,<1.20
+torch>=2.6,<3
+numpy>=2.0,<2.4
+protobuf>=4.25,<6
