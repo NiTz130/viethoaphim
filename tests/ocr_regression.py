@@ -16,6 +16,14 @@ import sys
 import traceback
 from pathlib import Path
 
+# Windows console defaults to cp1252 which chokes on Vietnamese (Tập) and other
+# non-ASCII characters in paths/reports. Force UTF-8 so the runner is portable.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+except (AttributeError, ValueError):
+    pass
+
 try:
     from vietdub.ocr.regression import (
         build_report, compute_metrics, match_segments,
