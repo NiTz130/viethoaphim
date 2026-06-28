@@ -18,7 +18,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+      - name: Install make (Windows)
+        if: runner.os == 'Windows'
+        run: choco install make -y --no-progress
       - name: Setup (Linux)
         if: runner.os != 'Windows'
         run: make setup
