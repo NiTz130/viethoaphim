@@ -47,8 +47,9 @@ def load_segments(path: Path) -> list[OcrSegment]:
 
 
 def run_ocr(video_path: Path, region: str) -> list[OcrSegment]:
-    """Invoke the project's PaddleOCR engine. Implemented in Task 5."""
-    raise NotImplementedError("Implemented in Task 5 (PaddleOCR bridge)")
+    """Invoke the project's PaddleOCR engine via the vietdub.ocr.bridge module."""
+    from vietdub.ocr.bridge import run_pipeline_ocr
+    return run_pipeline_ocr(video_path, region=region)
 
 
 def main() -> int:
