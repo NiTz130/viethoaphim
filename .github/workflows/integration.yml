@@ -15,7 +15,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: win-pip-${{ hashFiles('requirements.txt') }}
+          key: win-pip-${{ hashFiles('pyproject.toml') }}
       - run: .\setup.ps1
       - name: Run integration tests
         run: make test-integration
