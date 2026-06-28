@@ -1,6 +1,5 @@
 """OCR regression diff: match segments across two runs and compute metrics."""
 from difflib import SequenceMatcher
-from typing import Optional
 
 from .schema import OcrSegment
 
@@ -57,7 +56,6 @@ def compute_metrics(
     """Compute the 5 OCR regression metrics per spec §Data Flow."""
     base_by_id = {s.id: s for s in baseline}
     new_by_id = {s.id: s for s in new}
-    matched_new_ids = {n for _, n in matches}
 
     # segment_count
     bc = len(baseline)
@@ -87,7 +85,6 @@ def compute_metrics(
         sim_mean = 0.0
 
     # unmatched_pct (informational)
-    unmatched_baseline = [b for b, _ in matches]  # missing pairs are unmatched
     unmatched_total = (bc - len(matches)) + (nc - len(matches))
     unmatched_pct = unmatched_total / max(bc, nc) * 100 if max(bc, nc) else 0.0
 
