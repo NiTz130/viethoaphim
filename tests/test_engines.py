@@ -55,8 +55,8 @@ def test_paddle_ocr_engine_clears_stale_frames_before_extract(monkeypatch, tmp_p
         stale_frame.write_bytes(b"new")
         return type("Completed", (), {"returncode": 0, "stderr": "", "stdout": ""})()
 
-    monkeypatch.setattr("vietdub.ocr.subprocess.run", fake_run)
-    monkeypatch.setattr("vietdub.ocr._guard_optional_torch_import", lambda: None)
+    monkeypatch.setattr("vietdub.ocr.paddle.subprocess.run", fake_run)
+    monkeypatch.setattr("vietdub.ocr.paddle._guard_optional_torch_import", lambda: None)
 
     result = PaddleSubtitleOcrEngine(sample_every_seconds=0.5).recognize(video)
 

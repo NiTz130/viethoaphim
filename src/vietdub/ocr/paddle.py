@@ -7,7 +7,7 @@ import sys
 import types
 from pathlib import Path
 
-from .models import TimedSegment
+from ..models import TimedSegment
 
 
 class FixtureOcrEngine:
