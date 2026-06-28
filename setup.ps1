@@ -63,7 +63,10 @@ if (-not (Test-Path $reqFile)) { throw "pyproject.toml not found at $reqFile" }
 $reqHash = (Get-FileHash $reqFile -Algorithm SHA256).Hash
 if ((Test-Path $venvDir) -and (Test-Path $hashFile) -and ((Get-Content $hashFile -Raw) -eq $reqHash)) {
     Tee-Log "Step 4 OK: .venv already matches pyproject.toml hash. Skipping install."
-    Print-Activation
+    Tee-Log "  PowerShell: .\\.venv\\Scripts\\Activate.ps1"
+    Tee-Log "  cmd:        .venv\\Scripts\\activate.bat"
+    Tee-Log "  bash:       source .venv/bin/activate"
+    Tee-Log "=== setup.ps1 complete (no-op) at $(Get-Date -Format 'o') ==="
     exit 0
 }
 if (Test-Path $venvDir) {
