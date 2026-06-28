@@ -1,4 +1,4 @@
-.PHONY: ocr-diff ocr-baseline test lint clean help
+.PHONY: ocr-diff ocr-baseline test lint clean help venv-2026 ocr-diff-2026 test-integration
 
 BASELINE ?= jobs/Tập 1-5/ocr/subtitles.json
 VIDEO    ?= tests/fixtures/sample.mp4
@@ -39,3 +39,32 @@ lint:
 
 clean:
 	rm -rf tests/.tmp tests/fixtures/ocr_diff_report.json tests/fixtures/sample_diff.json
+
+venv-2026:
+	@if [ ! -f "requirements-2026.txt" ]; then \
+		echo "ERROR: requirements-2026.txt not found"; exit 1; \
+	fi
+	@reqHash=$$(sha256sum requirements-2026.txt | awk '{print $$1}'); \
+	if [ -d ".venv-2026" ] && [ "$$(cat build/installed-stack-2026.txt 2>/dev/null)" = "$$reqHash" ]; then \
+		echo "venv-2026 already up to date. Skipping."; \
+	else \
+		rm -rf .venv-2026; \
+		python3.11 -m venv .venv-2026; \
+		.venv-2026/bin/pip install --upgrade pip; \
+		.venv-2026/bin/pip install -r requirements-2026.txt; \
+		mkdir -p build && echo $$reqHash > build/installed-stack-2026.txt; \
+	fi
+
+ocr-diff-2026:
+	@if [ ! -d ".venv-2026" ]; then \
+		echo "Run 'make venv-2026' (Linux) or '.\\scripts\\setup-2026.ps1' (Windows) first"; \
+		exit 1; \
+	fi
+	.venv-2026/bin/python tests/ocr_regression_2026.py \
+		--baseline "$(BASELINE)" \
+		--video "$(VIDEO)" \
+		--output "$(OUTPUT)" \
+		--thresholds "$(THRESH)"
+
+test-integration:
+	pytest tests/integration/ -v -m integration
