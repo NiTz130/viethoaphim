@@ -196,3 +196,16 @@ vietdub resume .\jobs\sample --from tts
 ```
 
 Chi tiết manual test nằm trong `docs\manual-test.md`.
+
+## OCR Regression Testing
+
+Use the harness to compare OCR output across dependency stacks:
+
+```bash
+make ocr-diff            # uses default baseline (jobs/Tập 1-5/ocr/subtitles.json)
+make ocr-baseline CONFIRM=overwrite   # overwrite baseline (rare; needs review)
+```
+
+The harness computes 5 metrics (segment count delta, mean text length delta, time-range IoU, text similarity, unmatched %). SCORED thresholds are in `tests/fixtures/diff_thresholds.json`; the unmatched_pct metric is informational.
+
+Exit codes: `0` pass, `1` regression (block PR), `2` missing input, `3` OCR raised, `5` env broken.
