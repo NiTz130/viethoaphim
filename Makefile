@@ -1,6 +1,20 @@
-.PHONY: ocr-diff ocr-baseline test lint clean help venv-2026 ocr-diff-2026 test-integration
+.PHONY: setup bootstrap ocr-diff ocr-baseline test lint clean help venv-2026 ocr-diff-2026 test-integration
+
+# Cross-platform setup dispatch
+ifeq ($(OS),Windows_NT)
+setup:
+	@powershell -NoProfile -ExecutionPolicy Bypass -File setup.ps1
+bootstrap: setup
+else
+setup:
+	@if [ ! -d ".venv" ]; then python3.11 -m venv .venv; fi
+	@.venv/bin/pip install --upgrade pip --upgrade-strategy only-if-needed
+	@.venv/bin/pip install -e .
+bootstrap: setup
+endif
 
 BASELINE ?= jobs/Tập 1-5/ocr/subtitles.json
+
 VIDEO    ?= tests/fixtures/sample.mp4
 OUTPUT   ?= tests/fixtures/ocr_diff_report.json
 THRESH   ?= tests/fixtures/diff_thresholds.json
