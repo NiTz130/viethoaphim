@@ -25,6 +25,11 @@ if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
 & "$venvDir\Scripts\python.exe" -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed" }
 
+# Install vietdub editable so `import vietdub.ocr.regression` works in venv-2026.
+# (Required for tests/ocr_regression.py and tests/integration/test_full_pipeline_2026.py.)
+& "$venvDir\Scripts\python.exe" -m pip install -e .
+if ($LASTEXITCODE -ne 0) { throw "pip install -e . failed" }
+
 & "$venvDir\Scripts\python.exe" -m pip install -r $reqFile
 if ($LASTEXITCODE -ne 0) { throw "pip install -r requirements-2026.txt failed" }
 
