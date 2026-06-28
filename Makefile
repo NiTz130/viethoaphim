@@ -30,7 +30,7 @@ ocr-diff:
 		echo "  Run 'vietdub run' on a video first, or set BASELINE=<path>"; \
 		exit 2; \
 	fi
-	python tests/ocr_regression.py \
+	python3.11 tests/ocr_regression.py \
 		--baseline "$(BASELINE)" \
 		--video "$(VIDEO)" \
 		--output "$(OUTPUT)" \
