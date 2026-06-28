@@ -39,7 +39,7 @@ ffprobe -version
 .\setup.ps1
 ```
 
-`setup.ps1` checks Python 3.11+, AMD64 architecture, and VC++ 2019/2022 runtime, then creates `.venv/` and installs dependencies. Re-running is a no-op if `requirements.txt` hasn't changed.
+`setup.ps1` checks Python 3.11+, AMD64 architecture, and VC++ 2019/2022 runtime, then creates `.venv/` and installs dependencies. Re-running is a no-op if `pyproject.toml` hasn't changed.
 
 ### Linux / macOS / CI
 
@@ -47,18 +47,18 @@ ffprobe -version
 make setup
 ```
 
-Creates `.venv/` and installs from `requirements.txt`.
+Creates `.venv/` and installs via `pip install -e .` (editable install from `pyproject.toml`).
 
 ### Sau khi cài
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-vietdub run .\sample.mp4 --mode review --series sample-series
+vietdub run .\sample.mp4 --mode review --series "sample-series"
 ```
 
 ### Bootstrap từ scratch
 
-Nếu `.venv/` bị hỏng hoặc `requirements.txt` thay đổi:
+Nếu `.venv/` bị hỏng hoặc `pyproject.toml` thay đổi:
 
 ```powershell
 Remove-Item -Recurse -Force .venv
