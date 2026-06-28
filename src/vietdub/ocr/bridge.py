@@ -1,6 +1,8 @@
 """Bridge between vietdub's PaddleOCR pipeline and the regression schema."""
+from pathlib import Path
 from typing import Iterable
 
+from ..models import TimedSegment
 from .schema import OcrSegment, OcrSegmentError
 
 
@@ -18,6 +20,19 @@ def ocr_to_segments(raw: Iterable[dict]) -> list[OcrSegment]:
     return out
 
 
+def _timed_segment_to_ocr_dict(seg: TimedSegment) -> dict:
+    """Convert a TimedSegment into a dict with only the keys OcrSegment accepts.
+
+    Drops extra fields like ``source``, ``meta``, ``speaker``.
+    """
+    return {
+        "id": seg.id,
+        "start_ms": seg.start_ms,
+        "end_ms": seg.end_ms,
+        "text": seg.text,
+    }
+
+
 def run_pipeline_ocr(video_path, region: str = "bottom_28pct") -> list[OcrSegment]:
     """Run the vietdub PaddleOCR engine on a video file.
 
@@ -25,5 +40,6 @@ def run_pipeline_ocr(video_path, region: str = "bottom_28pct") -> list[OcrSegmen
     """
     from .paddle import PaddleSubtitleOcrEngine
     engine = PaddleSubtitleOcrEngine()
-    raw = engine.recognize(str(video_path))
-    return ocr_to_segments(raw)
+    raw_segments: list[TimedSegment] = engine.recognize(Path(video_path))
+    raw_dicts = [_timed_segment_to_ocr_dict(seg) for seg in raw_segments]
+    return ocr_to_segments(raw_dicts)
