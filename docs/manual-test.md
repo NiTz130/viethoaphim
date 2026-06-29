@@ -5,8 +5,9 @@
 - Windows
 - Python 3.11
 - FFmpeg in PATH
-- `OPENAI_API_KEY` set
-- `LLM_MODEL` set
+- `ANTHROPIC_API_KEY` set (MiniMax; get from `https://platform.minimax.io`)
+- `LLM_MODEL` set (default `MiniMax-M3`)
+- `TTS_VOICE_ID` set to a valid MiniMax voice id (NOT the legacy edge_tts name `vi-VN-HoaiMyNeural`; see `https://platform.minimax.io/faq/system-voice-id`)
 
 ## Test Video
 
@@ -34,4 +35,4 @@ vietdub resume .\jobs\sample --from tts
 - `context/characters.json` and `context/glossary.json` contain JSON that can be opened in a text editor.
 - `translation/review.csv` opens in Excel without mojibake.
 - `output/subtitles_vi.srt` contains the reviewed Vietnamese lines after `vietdub resume <job> --from tts` or `vietdub run <video> --mode auto`.
-- `tts/segments` contains one MP3 per reviewed non-empty row when Edge TTS succeeds.
+- `tts/segments` contains one MP3 per reviewed non-empty row when MiniMax TTS succeeds.
