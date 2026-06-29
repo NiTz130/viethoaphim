@@ -74,9 +74,11 @@ def _resolve_find_reference_data_dir():
 
 KNOWN_MODEL_OUTPUT_CAPS: dict[str, int] = {
     "MiniMax-M3": 8192,
+    "MiniMax-M2": 8192,
     "claude-haiku-4-5-20251001": 8192,
     "claude-sonnet-4-6": 8192,
     "claude-opus-4-8": 8192,
+    "claude-3-5-haiku-20241022": 8192,
 }
 
 
