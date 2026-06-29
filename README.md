@@ -235,6 +235,12 @@ Exit codes: `0` pass, `1` regression (block PR), `2` missing input, `3` OCR rais
 
 ### Rollback
 
+Nếu gặp regression do gitleaks infra (Spec 1) gây CI pain:
+
+```powershell
+git revert 12a2139
+```
+
 Nếu gặp regression sau cutover NumPy 2.x / paddlepaddle 3.x:
 
 ```powershell
