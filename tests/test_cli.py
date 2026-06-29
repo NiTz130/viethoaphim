@@ -160,3 +160,34 @@ def test_inspect_bare_job_name_uses_configured_jobs_dir_over_local_dir(monkeypat
     assert str(job_root) in result.output
     assert str(local_clip) not in result.output
     assert "done" in result.output
+
+
+def test_cli_main_reconfigures_stdout_to_utf8(monkeypatch):
+    """H3 fix: cli.main() reconfigures stdout/stderr to UTF-8 so Vietnamese
+    characters round-trip through typer.echo. Falls back silently if
+    reconfigure is not supported."""
+    import sys as sys_mod
+    from vietdub import cli
+
+    # Track reconfigure calls.
+    reconfig_calls = []
+    fake_stdout = type("FakeStream", (), {
+        "reconfigure": lambda self, **kwargs: reconfig_calls.append(("stdout", kwargs)),
+    })()
+    fake_stderr = type("FakeStream", (), {
+        "reconfigure": lambda self, **kwargs: reconfig_calls.append(("stderr", kwargs)),
+    })()
+
+    monkeypatch.setattr(sys_mod, "stdout", fake_stdout)
+    monkeypatch.setattr(sys_mod, "stderr", fake_stderr)
+    # Prevent typer from actually doing anything.
+    monkeypatch.setattr(cli, "app", lambda: None)
+
+    cli.main()
+
+    # Reconfigure must be called for both streams with utf-8.
+    stream_names = [name for name, _ in reconfig_calls]
+    encodings = [kwargs.get("encoding") for _, kwargs in reconfig_calls]
+    assert "stdout" in stream_names
+    assert "stderr" in stream_names
+    assert "utf-8" in encodings
