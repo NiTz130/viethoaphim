@@ -90,7 +90,7 @@ def _collect_review_csv(
     if not path.exists():
         return
     try:
-        with path.open("r", encoding="utf-8-sig", errors="ignore", newline="") as handle:
+        with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as handle:
             reader = csv.DictReader(handle)
             for row in reader:
                 text_cn = (row.get("text_cn") or "").strip()
@@ -262,7 +262,7 @@ def _load_json(path: Path, warnings: list[MemoryWarningItem]) -> Any | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except json.JSONDecodeError as exc:
         warnings.append(MemoryWarningItem(path=str(path), message=f"Invalid JSON: {exc.msg}"))
     except OSError as exc:

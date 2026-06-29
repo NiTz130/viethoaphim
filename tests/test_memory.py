@@ -279,3 +279,30 @@ def test_select_relevant_memory_limits_output_by_confidence_then_score():
     selected = select_relevant_memory(memory, segments, max_examples=1)
 
     assert [item["text_cn"] for item in selected["translation_examples"]] == ["\u5c0f\u660e\u4f60\u597d"]
+
+
+def test_memory_surfaces_corrupt_utf8_with_replace_marker(tmp_path):
+    """M5 fix: corrupt UTF-8 bytes are replaced with ? instead of silently
+    dropped, so the corruption is visible to the operator."""
+    from vietdub.memory import _collect_review_csv, MemoryWarningItem
+
+    job_dir = tmp_path / "job"
+    (job_dir / "translation").mkdir(parents=True)
+    # Write a review CSV with one valid line and one line containing a
+    # corrupt UTF-8 byte (0x80 is not valid UTF-8).
+    csv_bytes = (
+        b"segment_id,start_ms,end_ms,speaker,text_cn,text_vi,context_note,status\n"
+        b"m-0001,0,1000,,\xe4\xbd\xa0\xe5\xa5\xbd,Xin ch\xc3\xa0o,,reviewed\n"
+        b"m-0002,1000,2000,,\x80\x81\x82,Xin chao,,reviewed\n"
+    )
+    (job_dir / "translation" / "review.csv").write_bytes(csv_bytes)
+
+    examples: dict = {}
+    warnings: list[MemoryWarningItem] = []
+    _collect_review_csv(job_dir, examples, warnings)
+
+    # Two rows should be loaded (the corrupt one is recovered with U+FFFD).
+    assert len(examples) == 2
+    # The corrupt row's text_cn should contain U+FFFD replacement markers.
+    # Note: examples is keyed by text_cn, not segment_id; iterate values.
+    assert any("�" in ex.text_cn for ex in examples.values())

@@ -23,7 +23,7 @@ def load_dictionary_entries(path: Path) -> dict[str, str]:
         return {}
 
     entries: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
