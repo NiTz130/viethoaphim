@@ -1,0 +1,10 @@
+title = "vietdub gitleaks config"
+
+[allowlist]
+paths = [
+  '''\.env\.example$''',
+  '''^docs/''',
+]
+
+[extend]
+useDefault = true
