@@ -31,8 +31,18 @@ def test_speed_factor_for_duration():
 
 
 def test_atempo_filters_split_large_factor():
-    assert atempo_filters(4.0) == ["atempo=2.0", "atempo=2.0"]
+    assert atempo_filters(4.0) == ["atempo=2.0", "atempo=2"]
     assert atempo_filters(0.25) == ["atempo=0.5", "atempo=0.5"]
+
+
+def test_atempo_format_handles_edge_cases():
+    """L2: %g format produces minimal representation that FFmpeg accepts."""
+    from vietdub.sync import _format_atempo_value
+    assert _format_atempo_value(0.5) == "0.5"
+    assert _format_atempo_value(0.25) == "0.25"
+    assert _format_atempo_value(0.125) == "0.125"
+    assert _format_atempo_value(1.0) == "1"
+    assert _format_atempo_value(2.0) == "2"
 
 
 def test_assemble_final_audio_creates_timeline_and_report(tmp_path):

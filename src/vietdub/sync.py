@@ -13,10 +13,7 @@ from .models import SyncReport, SyncSegmentReport, TranslationRow
 
 
 def _format_atempo_value(value: float) -> str:
-    text = f"{value:.3g}"
-    if "." not in text and "e" not in text:
-        text = f"{text}.0"
-    return text
+    return f"{value:g}"
 
 
 def speed_factor_for_duration(actual_ms: int, target_ms: int) -> float:
