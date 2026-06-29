@@ -293,7 +293,11 @@ def translate_with_llm(
         pronoun_guide = _load_pronouns(ref_dir)
         phrase_patterns = _load_phrase_patterns(ref_dir)
         ignore_list = _load_ignore_list(ref_dir)
-    except Exception:
+    except Exception as exc:
+        print(
+            f"Warning: failed to load reference data: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
         pronoun_guide = []
         phrase_patterns = []
         ignore_list = []
@@ -329,7 +333,11 @@ def _load_initial_glossary() -> dict[str, str]:
         ref_root = Path(os.environ.get("REFERENCE_DATA_DIR", "data"))
         ref_dir = find_reference_data_dir(ref_root)
         glossary = load_dictionary_entries(ref_dir / "Names.txt")
-    except Exception:
+    except Exception as exc:
+        print(
+            f"Warning: failed to load initial glossary: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
         glossary = {}
     return glossary
 

@@ -900,3 +900,94 @@ def test_load_helpers_resilient_to_missing_files(tmp_path):
     assert _load_ignore_list(tmp_path) == []
 
 
+def test_translate_warns_and_falls_back_when_pronouns_unavailable(monkeypatch, capsys):
+    """H2 fix: when reference data fails to load, we still get a translation
+    but the user sees a Warning on stderr so the failure is diagnosable."""
+    from vietdub import translate as translate_mod
+    from vietdub.models import TimedSegment
+
+    # Make the reference-data lookup raise.
+    monkeypatch.setattr(
+        translate_mod, "find_reference_data_dir",
+        lambda _root: (_ for _ in ()).throw(RuntimeError("disk full")),
+    )
+    # Patch anthropic so translate_with_llm doesn't make a real call.
+    from vietdub.translate import translate_with_llm
+    import sys, types
+
+    class _TextBlock:
+        def __init__(self, text): self.text = text; self.type = "text"
+    class _Messages:
+        def __init__(self):
+            self.calls = []
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            user_prompt = kwargs["messages"][0]["content"]
+            payload = __import__("json").loads(user_prompt)
+            segs = payload["segments"]
+            # Handle both translation pass (id/text) and review pass (segment_id/text_cn).
+            def _row(s):
+                if "id" in s:
+                    return {
+                        "segment_id": s["id"],
+                        "start_ms": s["start_ms"],
+                        "end_ms": s["end_ms"],
+                        "speaker": s.get("speaker"),
+                        "text_cn": s["text"],
+                        "text_vi": "fallback vi",
+                        "context_note": "",
+                        "status": "draft",
+                    }
+                return {
+                    "segment_id": s["segment_id"],
+                    "start_ms": s["start_ms"],
+                    "end_ms": s["end_ms"],
+                    "speaker": s.get("speaker"),
+                    "text_cn": s.get("text_cn", ""),
+                    "text_vi": s.get("text_vi", "fallback vi"),
+                    "context_note": "",
+                    "status": "draft",
+                }
+            return types.SimpleNamespace(
+                content=[_TextBlock(__import__("json").dumps({
+                    "translations": [_row(s) for s in segs]
+                }))],
+                stop_reason="end_turn",
+            )
+    class _Anthropic:
+        def __init__(self, **kwargs): self.kwargs = kwargs; self.messages = _Messages()
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_Anthropic))
+
+    settings = types.SimpleNamespace(
+        anthropic_api_key="k", anthropic_base_url="https://api.minimax.io/anthropic", llm_model="MiniMax-M3",
+    )
+    rows = translate_with_llm(
+        [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="hello")],
+        {},
+        settings=settings,
+    )
+    assert len(rows) == 1
+    captured = capsys.readouterr()
+    assert "Warning" in captured.err
+    assert "RuntimeError" in captured.err
+    assert "disk full" in captured.err
+
+
+def test_load_initial_glossary_warns_and_returns_empty_when_file_missing(monkeypatch, capsys):
+    """H2 fix: when the initial glossary load fails, fall back to empty
+    dict but emit a Warning on stderr."""
+    from vietdub import translate as translate_mod
+
+    monkeypatch.setattr(
+        translate_mod, "load_dictionary_entries",
+        lambda _path: (_ for _ in ()).throw(OSError("permission denied")),
+    )
+
+    glossary = translate_mod._load_initial_glossary()
+    assert glossary == {}
+    captured = capsys.readouterr()
+    assert "Warning" in captured.err
+    assert "OSError" in captured.err
+    assert "permission denied" in captured.err
+
+
