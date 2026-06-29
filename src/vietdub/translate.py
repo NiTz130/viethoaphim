@@ -247,9 +247,9 @@ LLM_RETRY_BACKOFF_FACTOR = 2.0
 
 KNOWN_MODEL_OUTPUT_CAPS: dict[str, int] = {
     "MiniMax-M3": 8192,
-    "claude-3-haiku-20240307": 4096,
-    "claude-3-5-sonnet-20240620": 8192,
-    "claude-3-opus-20240229": 4096,
+    "claude-haiku-4-5-20251001": 8192,
+    "claude-sonnet-4-6": 8192,
+    "claude-opus-4-8": 8192,
 }
 
 
