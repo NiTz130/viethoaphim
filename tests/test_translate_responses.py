@@ -636,3 +636,45 @@ def test_translate_with_llm_handles_empty_segments(monkeypatch):
     assert len(_BatchAwareAnthropic.instances) == 0
 
 
+def test_translate_with_llm_retries_408_425_524(monkeypatch):
+    """M9 fix: 408 (Request Timeout), 425 (Too Early), and 524 (Cloudflare timeout)
+    are now in the retryable HTTP status set, matching 429 and the 5xx family."""
+    import sys, types, json
+    from vietdub.models import TimedSegment
+    from vietdub.translate import translate_with_llm
+
+    for retryable_status in (408, 425, 524):
+        # Reuse the same mock structure as the existing 429 test.
+        class _StatusError(Exception):
+            status_code = retryable_status
+            message = "transient"
+
+        class _BoomMessages:
+            def create(self, **kwargs):
+                raise _StatusError()
+
+        class _BoomAnthropic:
+            def __init__(self, **kwargs):
+                self.messages = _BoomMessages()
+
+        monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(
+            Anthropic=_BoomAnthropic,
+            APIStatusError=_StatusError,
+            AuthenticationError=type("AuthenticationError", (Exception,), {}),
+            APIConnectionError=type("APIConnectionError", (Exception,), {}),
+        ))
+        monkeypatch.setattr("time.sleep", lambda _: None)
+        # Reset the warn-once state.
+        from vietdub import translate as translate_mod
+        monkeypatch.setattr(translate_mod, "_warned_unknown_caps", set())
+
+        settings = types.SimpleNamespace(
+            anthropic_api_key="k", anthropic_base_url="https://api.minimax.io/anthropic", llm_model="MiniMax-M3",
+        )
+        with pytest.raises(RuntimeError, match="4 attempts"):
+            translate_with_llm(
+                [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="x")],
+                {}, settings=settings,
+            )
+
+

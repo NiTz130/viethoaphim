@@ -633,7 +633,7 @@ def _translate_one_batch_with_retry(
         except api_status_error as exc:
             last_exc = exc
             status = getattr(exc, "status_code", None)
-            if status not in {429, 500, 502, 503, 504}:
+            if status not in {408, 425, 429, 500, 502, 503, 504, 524}:
                 if isinstance(exc, authentication_error):
                     raise RuntimeError(f"MiniMax authentication failed: {exc}") from exc
                 raise RuntimeError(f"MiniMax HTTP {status}: {exc.message}") from exc
