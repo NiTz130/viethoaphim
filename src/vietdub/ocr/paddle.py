@@ -92,6 +92,21 @@ class PaddleSubtitleOcrEngine:
 
 
 def _guard_optional_torch_import() -> None:
+    """Install a torch stub if real torch fails to import (e.g., DLL load error on Windows).
+
+    PaddleOCR lazily imports torch; on hosts where torch's DLLs are broken
+    (notably paddlepaddle 3.x on some Windows installs), this would crash
+    at PaddleOCR import time. This guard:
+
+    - Returns silently if torch imports cleanly.
+    - Catches OSError on import and installs a sentinel ModuleType:
+      - `torch.Tensor = object` (any isinstance check returns True)
+      - `torch.from_numpy` raises RuntimeError on call (any real tensor op fails)
+
+    The stub lets PaddleOCR import complete (since it only references
+    torch.Tensor, which becomes `object`). Any code that actually tries
+    to use torch will fail loudly.
+    """
     try:
         import torch  # noqa: F401
     except ImportError:
