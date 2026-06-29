@@ -246,6 +246,9 @@ KNOWN_MODEL_OUTPUT_CAPS: dict[str, int] = {
 }
 
 
+_warned_unknown_caps: set[str] = set()
+
+
 def translate_with_llm(
     segments: list[TimedSegment],
     context_bundle: dict,
@@ -275,11 +278,12 @@ def translate_with_llm(
             f"({cap}) for model {settings.llm_model!r}. "
             f"Reduce LLM_MAX_TOKENS or use a different model."
         )
-    if cap is None:
+    if cap is None and settings.llm_model not in _warned_unknown_caps:
+        _warned_unknown_caps.add(settings.llm_model)
         print(
             f"Warning: model {settings.llm_model!r} not in KNOWN_MODEL_OUTPUT_CAPS; "
-            f"skipping output cap validation. If you hit truncation, "
-            f"add the model's output cap to the dict.",
+            f"skipping output cap validation (warning shown once per model). "
+            f"If you hit truncation, add the model's output cap to the dict.",
             file=sys.stderr,
         )
 

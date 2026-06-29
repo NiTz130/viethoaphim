@@ -991,3 +991,140 @@ def test_load_initial_glossary_warns_and_returns_empty_when_file_missing(monkeyp
     assert "permission denied" in captured.err
 
 
+def test_translate_warns_once_for_unknown_model(monkeypatch, capsys):
+    """H4 fix: unknown-model warning appears only once per process per model."""
+    from vietdub import translate as translate_mod
+    from vietdub.translate import translate_with_llm, _warned_unknown_caps
+    from vietdub.models import TimedSegment
+    import sys, types, json
+
+    # Reset module state for this test.
+    monkeypatch.setattr(translate_mod, "_warned_unknown_caps", set())
+
+    unknown_model = "fake-unknown-model-xyz"
+
+    # Patch anthropic.
+    class _TextBlock:
+        def __init__(self, text): self.text = text; self.type = "text"
+    def _make_messages():
+        class _Messages:
+            def __init__(self): self.calls = []
+            def create(self, **kwargs):
+                self.calls.append(kwargs)
+                user_prompt = kwargs["messages"][0]["content"]
+                payload = json.loads(user_prompt)
+                segs = payload["segments"]
+                # Handle translate pass (id/text) and review pass (segment_id/text_cn).
+                def _row(s):
+                    if "id" in s:
+                        return {
+                            "segment_id": s["id"],
+                            "start_ms": s["start_ms"],
+                            "end_ms": s["end_ms"],
+                            "speaker": s.get("speaker"),
+                            "text_cn": s["text"],
+                            "text_vi": "vi",
+                            "context_note": "",
+                            "status": "draft",
+                        }
+                    return {
+                        "segment_id": s["segment_id"],
+                        "start_ms": s["start_ms"],
+                        "end_ms": s["end_ms"],
+                        "speaker": s.get("speaker"),
+                        "text_cn": s.get("text_cn", ""),
+                        "text_vi": s.get("text_vi", "vi"),
+                        "context_note": "",
+                        "status": "draft",
+                    }
+                return types.SimpleNamespace(
+                    content=[_TextBlock(json.dumps({
+                        "translations": [_row(s) for s in segs]
+                    }))],
+                    stop_reason="end_turn",
+                )
+        return _Messages()
+    class _Anthropic:
+        def __init__(self, **kwargs): self.kwargs = kwargs; self.messages = _make_messages()
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_Anthropic))
+
+    settings = types.SimpleNamespace(
+        anthropic_api_key="k", anthropic_base_url="https://api.minimax.io/anthropic", llm_model=unknown_model,
+    )
+    segs = [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="hello")]
+
+    # First call: should warn.
+    translate_with_llm(segs, {}, settings=settings)
+    captured1 = capsys.readouterr()
+    warning_count_1 = captured1.err.count("not in KNOWN_MODEL_OUTPUT_CAPS")
+
+    # Second call: should NOT warn again.
+    translate_with_llm(segs, {}, settings=settings)
+    captured2 = capsys.readouterr()
+    warning_count_2 = captured2.err.count("not in KNOWN_MODEL_OUTPUT_CAPS")
+
+    assert warning_count_1 == 1, f"Expected 1 warning on first call, got {warning_count_1}"
+    assert warning_count_2 == 0, f"Expected 0 warnings on second call, got {warning_count_2}"
+
+
+def test_translate_known_model_emits_no_cap_warning(monkeypatch, capsys):
+    """H4 sanity: known models (MiniMax-M3) do not emit the unknown-cap warning."""
+    from vietdub import translate as translate_mod
+    from vietdub.translate import translate_with_llm
+    from vietdub.models import TimedSegment
+    import sys, types, json
+
+    monkeypatch.setattr(translate_mod, "_warned_unknown_caps", set())
+
+    class _TextBlock:
+        def __init__(self, text): self.text = text; self.type = "text"
+    def _make_messages():
+        class _Messages:
+            def __init__(self): self.calls = []
+            def create(self, **kwargs):
+                user_prompt = kwargs["messages"][0]["content"]
+                payload = json.loads(user_prompt)
+                segs = payload["segments"]
+                # Handle translate pass (id/text) and review pass (segment_id/text_cn).
+                def _row(s):
+                    if "id" in s:
+                        return {
+                            "segment_id": s["id"],
+                            "start_ms": s["start_ms"],
+                            "end_ms": s["end_ms"],
+                            "speaker": s.get("speaker"),
+                            "text_cn": s["text"],
+                            "text_vi": "vi",
+                            "context_note": "",
+                            "status": "draft",
+                        }
+                    return {
+                        "segment_id": s["segment_id"],
+                        "start_ms": s["start_ms"],
+                        "end_ms": s["end_ms"],
+                        "speaker": s.get("speaker"),
+                        "text_cn": s.get("text_cn", ""),
+                        "text_vi": s.get("text_vi", "vi"),
+                        "context_note": "",
+                        "status": "draft",
+                    }
+                return types.SimpleNamespace(
+                    content=[_TextBlock(json.dumps({
+                        "translations": [_row(s) for s in segs]
+                    }))],
+                    stop_reason="end_turn",
+                )
+        return _Messages()
+    class _Anthropic:
+        def __init__(self, **kwargs): self.kwargs = kwargs; self.messages = _make_messages()
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_Anthropic))
+
+    settings = types.SimpleNamespace(
+        anthropic_api_key="k", anthropic_base_url="https://api.minimax.io/anthropic", llm_model="MiniMax-M3",
+    )
+    segs = [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="hello")]
+    translate_with_llm(segs, {}, settings=settings)
+    captured = capsys.readouterr()
+    assert "not in KNOWN_MODEL_OUTPUT_CAPS" not in captured.err
+
+
