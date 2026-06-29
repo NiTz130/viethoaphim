@@ -120,7 +120,9 @@ def _collect_translated_json(
     warnings: list[MemoryWarningItem],
 ) -> None:
     path = job_dir / "translation" / "translated.json"
-    data = _load_json(path, warnings)
+    data, warning = _load_json(path)
+    if warning is not None:
+        warnings.append(warning)
     if data is None:
         return
     rows = data.get("translations", []) if isinstance(data, dict) else data
@@ -154,7 +156,9 @@ def _collect_characters_json(
     warnings: list[MemoryWarningItem],
 ) -> None:
     path = job_dir / "context" / "characters.json"
-    data = _load_json(path, warnings)
+    data, warning = _load_json(path)
+    if warning is not None:
+        warnings.append(warning)
     if data is None:
         return
     if not isinstance(data, list):
@@ -188,7 +192,9 @@ def _collect_glossary_json(
     warnings: list[MemoryWarningItem],
 ) -> None:
     path = job_dir / "context" / "glossary.json"
-    data = _load_json(path, warnings)
+    data, warning = _load_json(path)
+    if warning is not None:
+        warnings.append(warning)
     if data is None:
         return
     if not isinstance(data, dict):
@@ -218,7 +224,9 @@ def _collect_reference_context_json(
     warnings: list[MemoryWarningItem],
 ) -> None:
     path = job_dir / "context" / "reference_context.json"
-    data = _load_json(path, warnings)
+    data, warning = _load_json(path)
+    if warning is not None:
+        warnings.append(warning)
     if data is None:
         return
     if not isinstance(data, dict):
@@ -258,16 +266,22 @@ def _collect_reference_context_json(
                 )
 
 
-def _load_json(path: Path, warnings: list[MemoryWarningItem]) -> Any | None:
+def _load_json(path: Path) -> tuple[Any, "MemoryWarningItem | None"]:
+    """Load JSON from path, distinguishing missing-file from corruption.
+
+    Returns:
+        (data, None) on success.
+        (None, None) if the file does not exist (caller treats as no-data).
+        (None, warning) if the file exists but cannot be parsed or read.
+    """
     if not path.exists():
-        return None
+        return None, None
     try:
-        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        return json.loads(path.read_text(encoding="utf-8", errors="replace")), None
     except json.JSONDecodeError as exc:
-        warnings.append(MemoryWarningItem(path=str(path), message=f"Invalid JSON: {exc.msg}"))
+        return None, MemoryWarningItem(path=str(path), message=f"Invalid JSON: {exc.msg}")
     except OSError as exc:
-        warnings.append(MemoryWarningItem(path=str(path), message=f"Could not read JSON: {exc}"))
-    return None
+        return None, MemoryWarningItem(path=str(path), message=f"Could not read JSON: {exc}")
 
 
 def _parse_confidence(

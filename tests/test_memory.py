@@ -306,3 +306,28 @@ def test_memory_surfaces_corrupt_utf8_with_replace_marker(tmp_path):
     # The corrupt row's text_cn should contain U+FFFD replacement markers.
     # Note: examples is keyed by text_cn, not segment_id; iterate values.
     assert any("�" in ex.text_cn for ex in examples.values())
+
+
+def test_load_json_distinguishes_missing_from_corrupt(tmp_path):
+    """L5: _load_json returns (None, None) for missing files and (None, warning)
+    for corrupt files — caller can distinguish the two cases."""
+    from vietdub.memory import _load_json, MemoryWarningItem
+
+    missing = tmp_path / "does-not-exist.json"
+    data, warning = _load_json(missing)
+    assert data is None
+    assert warning is None
+
+    corrupt = tmp_path / "corrupt.json"
+    corrupt.write_text("{not valid json", encoding="utf-8")
+    data, warning = _load_json(corrupt)
+    assert data is None
+    assert warning is not None
+    assert isinstance(warning, MemoryWarningItem)
+    assert "Invalid JSON" in warning.message
+
+    good = tmp_path / "good.json"
+    good.write_text('{"k": "v"}', encoding="utf-8")
+    data, warning = _load_json(good)
+    assert data == {"k": "v"}
+    assert warning is None
