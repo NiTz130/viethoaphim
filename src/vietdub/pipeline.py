@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 import subprocess
 from pathlib import Path
 
@@ -11,9 +10,6 @@ from .jobs import Job, JobManager
 from .merge import merge_segments
 from .models import StepName, TimedSegment, TranslationRow
 from .translate import export_review_csv
-
-
-SAFE_SEGMENT_ID_RE = re.compile(r"^m-\d+$")
 
 
 def write_segments(job: Job, relative: str, segments: list[TimedSegment]) -> None:
@@ -118,10 +114,13 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     return job
 
 
-def _load_allowed_segment_ids(job: Job) -> set[str] | None:
+def _load_allowed_segment_ids(job: Job) -> set[str]:
     merged_path = job.root / "transcript" / "merged.json"
     if not merged_path.exists():
-        return None
+        raise RuntimeError(
+            f"Cannot resume: {merged_path} does not exist. "
+            f"Re-run 'vietdub run' on the source video to regenerate job artifacts."
+        )
     try:
         data = json.loads(merged_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -145,12 +144,6 @@ def _is_safe_segment_path_component(segment_id: str) -> bool:
     return True
 
 
-def _is_safe_fallback_segment_id(segment_id: str) -> bool:
-    if not _is_safe_segment_path_component(segment_id):
-        return False
-    return SAFE_SEGMENT_ID_RE.fullmatch(segment_id) is not None
-
-
 def _validate_resume_segment_ids(job: Job, rows: list[TranslationRow]) -> None:
     allowed_ids = _load_allowed_segment_ids(job)
     review_path = job.root / "translation" / "review.csv"
@@ -165,11 +158,10 @@ def _validate_resume_segment_ids(job: Job, rows: list[TranslationRow]) -> None:
             )
         if not _is_safe_segment_path_component(segment_id):
             raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r}")
-        if allowed_ids is not None:
-            if segment_id not in allowed_ids:
-                raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r} is not in transcript/merged.json")
-        elif not _is_safe_fallback_segment_id(segment_id):
-            raise RuntimeError(f"Invalid segment_id in {review_path}: {segment_id!r}")
+        if segment_id not in allowed_ids:
+            raise RuntimeError(
+                f"Invalid segment_id in {review_path}: {segment_id!r} is not in transcript/merged.json"
+            )
         if segment_id in active_ids:
             raise RuntimeError(f"Duplicate segment_id in {review_path}: {segment_id!r}")
         active_ids.add(segment_id)
