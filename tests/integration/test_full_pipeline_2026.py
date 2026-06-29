@@ -81,3 +81,22 @@ def test_full_pipeline_2026_smoke() -> None:
     # Every recorded step must have state == "done".
     bad = {name: info for name, info in status.items() if info.get("state") != "done"}
     assert not bad, f"steps not done: {bad}"
+
+    # Content assertions (M11): ensure each step actually wrote useful output,
+    # not just that the step state is "done".
+    job_root = STATUS_PATH.parent
+    review_csv = job_root / "translation" / "review.csv"
+    assert review_csv.exists(), f"review.csv not written at {review_csv}"
+    review_text = review_csv.read_text(encoding="utf-8")
+    row_count = max(0, len(review_text.splitlines()) - 1)
+    assert row_count > 0, f"review.csv has 0 rows (header only): {review_csv}"
+
+    ocr_json = job_root / "ocr" / "subtitles.json"
+    assert ocr_json.exists(), f"subtitles.json not written at {ocr_json}"
+    ocr_data = json.loads(ocr_json.read_text(encoding="utf-8"))
+    assert isinstance(ocr_data, list), f"subtitles.json is not a list: {ocr_json}"
+    assert len(ocr_data) > 0, f"subtitles.json has 0 segments: {ocr_json}"
+
+    # Every recorded step must have a non-empty details dict.
+    for step_name, info in status.items():
+        assert info.get("details"), f"step {step_name} has no details: {info}"
