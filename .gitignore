@@ -1,9 +1,19 @@
+# Secrets / config
 .env
+
+# Python build / cache
 __pycache__/
 .pytest_cache/
 *.py[cod]
-jobs/
 src/*.egg-info/
 .worktrees/
-build/installed-stack*.txt
-build/*.log
+
+# Project working dirs
+jobs/
+
+# Build artifacts (entire dir — verified empty via `git ls-files build/`)
+build/
+
+# Generated test fixtures
+tests/fixtures/ocr_frames/
+tests/fixtures/sample_diff.json
