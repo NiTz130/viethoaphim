@@ -21,3 +21,4 @@ class Settings(BaseSettings):
     sample_rate: int = 44_100
     ocr_use_gpu: bool = False
     ocr_enable_mkldnn: bool = False
+    max_video_size_mb: int = 10240  # 10 GB; 0 disables

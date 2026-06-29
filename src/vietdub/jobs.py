@@ -72,6 +72,21 @@ class JobManager:
                 suffix += 1
         for relative in JOB_DIRS:
             (root / relative).mkdir(parents=True, exist_ok=True)
+        # Check video size before copying (L3).
+        size_bytes = video.stat().st_size
+        size_mb = size_bytes / (1024 * 1024)
+        limit_mb = 10240
+        try:
+            from .config import Settings
+            limit_mb = Settings().max_video_size_mb
+        except Exception:
+            pass
+        if limit_mb > 0 and size_mb > limit_mb:
+            raise RuntimeError(
+                f"Video too large: {size_mb:.1f}MB exceeds max_video_size_mb={limit_mb}MB. "
+                f"Set MAX_VIDEO_SIZE_MB=0 in env (or jobs.max_video_size_mb=0 in .env) to disable."
+            )
+
         shutil.copy2(video, root / "input.mp4")
         config = {
             "source_video": str(video.resolve()),
