@@ -515,17 +515,22 @@ def test_translate_one_batch_detects_row_count_mismatch(monkeypatch):
 
 
 def test_translate_with_llm_raises_when_llm_max_tokens_exceeds_model_cap(monkeypatch):
+    """M3: the cap-exceeded check still fires when max_tokens > cap for any
+    in-dict model. We patch LLM_MAX_TOKENS to a value larger than every
+    cap in KNOWN_MODEL_OUTPUT_CAPS so the test is robust to dict refreshes."""
+    from vietdub import translate as translate_mod
+    monkeypatch.setattr(translate_mod, "LLM_MAX_TOKENS", 16384)
     monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_FakeAnthropic))
 
     with pytest.raises(RuntimeError, match="exceeds known output cap") as exc_info:
         translate_with_llm(
             segments=[TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="x")],
             context_bundle={},
-            settings=_settings(llm_model="claude-3-haiku-20240307"),
+            settings=_settings(llm_model="claude-haiku-4-5-20251001"),
         )
 
     msg = str(exc_info.value)
-    assert "4096" in msg
+    assert "16384" in msg
     assert "8192" in msg
 
 
