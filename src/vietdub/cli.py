@@ -17,10 +17,31 @@ def safe_echo(message: object) -> None:
     typer.echo(text.encode("ascii", errors="replace").decode("ascii"))
 
 
-def _open_job(job_dir: Path, jobs_dir: Path) -> Job:
-    candidate = jobs_dir / job_dir if not job_dir.is_absolute() and len(job_dir.parts) == 1 else job_dir
+def _resolve_job_path(
+    job_dir: Path | None,
+    job_name: str | None,
+    jobs_dir: Path,
+) -> Path:
+    """Resolve a CLI job reference to an absolute path.
+
+    - If job_dir is given and absolute, use as-is.
+    - If job_dir is given and exists, use as-is.
+    - If job_dir is given but doesn't exist as a literal, try under jobs_dir.
+    - If job_name is given, use jobs_dir / job_name.
+    - Otherwise raise.
+    """
+    if job_dir is not None:
+        if job_dir.is_absolute() or job_dir.exists():
+            return job_dir
+        return jobs_dir / job_dir
+    if job_name is not None:
+        return jobs_dir / job_name
+    raise typer.BadParameter("Either job_dir or --job-name is required")
+
+
+def _open_job(target: Path, jobs_dir: Path) -> Job:
     try:
-        return JobManager(jobs_dir).open(candidate)
+        return JobManager(jobs_dir).open(target)
     except FileNotFoundError as exc:
         raise typer.BadParameter(str(exc)) from exc
 
@@ -61,11 +82,13 @@ def run(
 
 @app.command()
 def resume(
-    job_dir: Path,
+    job_dir: Path = typer.Argument(None, help="Path to job dir, or a bare name to resolve under JOBS_DIR."),
+    job_name: str | None = typer.Option(None, "--job-name", help="Bare job name under JOBS_DIR."),
     from_step: StepName = typer.Option(..., "--from", help="Step to resume from."),
 ) -> None:
     settings = Settings()
-    job = _open_job(job_dir, Path(settings.jobs_dir))
+    target = _resolve_job_path(job_dir, job_name, Path(settings.jobs_dir))
+    job = _open_job(target, Path(settings.jobs_dir))
     if from_step == StepName.TTS:
         try:
             srt_path = resume_tts_and_render(job, settings)
@@ -78,9 +101,13 @@ def resume(
 
 
 @app.command()
-def inspect(job_dir: Path) -> None:
+def inspect(
+    job_dir: Path = typer.Argument(None, help="Path to job dir, or a bare name to resolve under JOBS_DIR."),
+    job_name: str | None = typer.Option(None, "--job-name", help="Bare job name under JOBS_DIR."),
+) -> None:
     settings = Settings()
-    job = _open_job(job_dir, Path(settings.jobs_dir))
+    target = _resolve_job_path(job_dir, job_name, Path(settings.jobs_dir))
+    job = _open_job(target, Path(settings.jobs_dir))
     safe_echo(job.root)
     safe_echo(job.load_status())
 

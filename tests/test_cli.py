@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from typer.testing import CliRunner
 
 from vietdub.cli import app
@@ -133,7 +135,7 @@ def test_inspect_opens_bare_job_name_from_configured_jobs_dir(monkeypatch, tmp_p
 
     monkeypatch.setenv("JOBS_DIR", str(jobs_dir))
 
-    result = runner.invoke(app, ["inspect", "clip"])
+    result = runner.invoke(app, ["inspect", "--job-name", "clip"])
 
     assert result.exit_code == 0
     assert str(job_root) in result.output
@@ -154,7 +156,7 @@ def test_inspect_bare_job_name_uses_configured_jobs_dir_over_local_dir(monkeypat
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("JOBS_DIR", str(jobs_dir))
 
-    result = runner.invoke(app, ["inspect", "clip"])
+    result = runner.invoke(app, ["inspect", "--job-name", "clip"])
 
     assert result.exit_code == 0
     assert str(job_root) in result.output
@@ -191,3 +193,37 @@ def test_cli_main_reconfigures_stdout_to_utf8(monkeypatch):
     assert "stdout" in stream_names
     assert "stderr" in stream_names
     assert "utf-8" in encodings
+
+
+def test_resolve_job_path_absolute_unchanged(tmp_path):
+    from vietdub.cli import _resolve_job_path
+    absolute = tmp_path / "job"
+    absolute.mkdir()
+    result = _resolve_job_path(absolute, None, tmp_path / "jobs")
+    assert result == absolute
+
+
+def test_resolve_job_path_bare_name_under_jobs_dir(tmp_path):
+    from vietdub.cli import _resolve_job_path
+    jobs_dir = tmp_path / "jobs"
+    target = jobs_dir / "clip"
+    target.mkdir(parents=True)
+    # Pass a non-existent bare name; the helper should fall back to jobs_dir / job_dir.
+    result = _resolve_job_path(Path("clip"), None, jobs_dir)
+    assert result == target
+
+
+def test_resolve_job_path_job_name_flag(tmp_path):
+    from vietdub.cli import _resolve_job_path
+    jobs_dir = tmp_path / "jobs"
+    target = jobs_dir / "clip"
+    target.mkdir(parents=True)
+    result = _resolve_job_path(None, "clip", jobs_dir)
+    assert result == target
+
+
+def test_resolve_job_path_neither_raises():
+    import pytest
+    from vietdub.cli import _resolve_job_path
+    with pytest.raises(Exception):  # typer.BadParameter
+        _resolve_job_path(None, None, __import__("pathlib").Path("/tmp"))
