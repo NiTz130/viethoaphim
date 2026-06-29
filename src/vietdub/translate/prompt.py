@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import json
+import json as _json
 import logging
 import re
+from importlib.resources import files
 from json import JSONDecodeError
+from pathlib import Path as _Path
 
 from pydantic import ValidationError
 
@@ -16,38 +18,22 @@ _LEADING_FENCE_RE = re.compile(r"^```[a-zA-Z]*\n?")
 _TRAILING_FENCE_RE = re.compile(r"\n?```$")
 
 
-_EXAMPLES: list[dict] = [
-    {
-        "segment_id": "ex-1",
-        "start_ms": 0,
-        "end_ms": 2440,
-        "speaker": "",
-        "text_cn": "你这个笨蛋！",
-        "text_vi": "Mày ngu vậy!",
-        "context_note": "",
-        "status": "draft",
-    },
-    {
-        "segment_id": "ex-2",
-        "start_ms": 2440,
-        "end_ms": 4320,
-        "speaker": "",
-        "text_cn": "长老，我们该怎么办？",
-        "text_vi": "Trưởng lão, giờ chúng ta phải làm sao?",
-        "context_note": "",
-        "status": "draft",
-    },
-    {
-        "segment_id": "ex-3",
-        "start_ms": 4320,
-        "end_ms": 5960,
-        "speaker": "",
-        "text_cn": "哈哈哈哈，你真是太有趣了！",
-        "text_vi": "Hahaha, mày buồn cười thiệt chứ!",
-        "context_note": "",
-        "status": "draft",
-    },
-]
+def _load_few_shot_examples() -> list[dict]:
+    """Load few-shot examples from the package data directory.
+
+    Uses importlib.resources for installed packages, with a fallback
+    to a relative path for running directly from the source tree.
+    """
+    data = files("vietdub").joinpath("data", "few_shot_examples.json")
+    if data.is_file():
+        return _json.loads(data.read_text(encoding="utf-8"))
+    # Dev fallback: look for data/few_shot_examples.json relative to repo root.
+    path = _Path(__file__).parent.parent.parent / "data" / "few_shot_examples.json"
+    if path.is_file():
+        return _json.loads(path.read_text(encoding="utf-8"))
+    raise FileNotFoundError(
+        f"few_shot_examples.json not found in package data or at {path}"
+    )
 
 
 # Use the parent package's logger so test assertions on
@@ -88,11 +74,11 @@ def parse_translation_response(
         Validated rows parsed from the JSON payload.
     """
     try:
-        data = json.loads(content)
+        data = _json.loads(content)
     except JSONDecodeError as exc_raw:
         # Retry after stripping markdown code fences (LLMs sometimes wrap JSON in ```json ... ```)
         try:
-            data = json.loads(_strip_markdown_fences(content))
+            data = _json.loads(_strip_markdown_fences(content))
         except JSONDecodeError as exc_stripped:
             new_exc = RuntimeError(
                 f"Invalid LLM translation response: invalid JSON at char {exc_stripped.pos}"
@@ -158,7 +144,7 @@ def build_translation_prompt(
             "  [{\"segment_id\": \"m-0001\", ...}]  (bare array, missing top-level object)",
             "  Wrapped in markdown fences or extra braces",
         ],
-        "examples": _EXAMPLES,
+        "examples": _load_few_shot_examples(),
         "consistency_terms": [
             {"source": cn, "target": vi} for cn, vi in (glossary or {}).items()
         ],
@@ -171,4 +157,4 @@ def build_translation_prompt(
             for segment in segments
         ],
     }
-    return json.dumps(payload, ensure_ascii=False)
+    return _json.dumps(payload, ensure_ascii=False)

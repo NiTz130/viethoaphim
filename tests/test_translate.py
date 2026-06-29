@@ -1161,3 +1161,14 @@ def test_translate_known_model_emits_no_cap_warning(monkeypatch, caplog):
     assert not cap_warnings, f"Expected no cap warning for known model, got: {[w.getMessage() for w in cap_warnings]}"
 
 
+def test_load_few_shot_examples_returns_three():
+    """L1: 3 few-shot examples load correctly from package data."""
+    from vietdub.translate.prompt import _load_few_shot_examples
+    examples = _load_few_shot_examples()
+    assert len(examples) == 3
+    for ex in examples:
+        assert ex["segment_id"].startswith("ex-")
+        assert ex["text_cn"]
+        assert ex["text_vi"]
+
+

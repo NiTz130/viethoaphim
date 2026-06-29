@@ -1,0 +1,32 @@
+[
+  {
+    "segment_id": "ex-1",
+    "start_ms": 0,
+    "end_ms": 2440,
+    "speaker": "",
+    "text_cn": "你这个笨蛋！",
+    "text_vi": "Mày ngu vậy!",
+    "context_note": "",
+    "status": "draft"
+  },
+  {
+    "segment_id": "ex-2",
+    "start_ms": 2440,
+    "end_ms": 4320,
+    "speaker": "",
+    "text_cn": "长老，我们该怎么办？",
+    "text_vi": "Trưởng lão, giờ chúng ta phải làm sao?",
+    "context_note": "",
+    "status": "draft"
+  },
+  {
+    "segment_id": "ex-3",
+    "start_ms": 4320,
+    "end_ms": 5960,
+    "speaker": "",
+    "text_cn": "哈哈哈哈，你真是太有趣了！",
+    "text_vi": "Hahaha, mày buồn cười thiệt chứ!",
+    "context_note": "",
+    "status": "draft"
+  }
+]
