@@ -546,7 +546,7 @@ def test_translate_with_llm_passes_when_model_cap_sufficient(monkeypatch):
     assert len(rows) == 1
 
 
-def test_translate_with_llm_warns_for_unknown_model(monkeypatch, capsys):
+def test_translate_with_llm_warns_for_unknown_model(monkeypatch, caplog):
     monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=_FakeAnthropic))
 
     rows = translate_with_llm(
@@ -556,9 +556,11 @@ def test_translate_with_llm_warns_for_unknown_model(monkeypatch, capsys):
     )
 
     assert len(rows) == 1
-    captured = capsys.readouterr()
-    assert "some-future-model-xyz" in captured.err
-    assert "KNOWN_MODEL_OUTPUT_CAPS" in captured.err
+    warnings = [r for r in caplog.records if r.name == "vietdub.translate" and r.levelname == "WARNING"]
+    assert warnings, "Expected at least one WARNING log from vietdub.translate"
+    msg = warnings[0].getMessage()
+    assert "some-future-model-xyz" in msg
+    assert "KNOWN_MODEL_OUTPUT_CAPS" in msg
 
 
 def test_translate_with_llm_batches_50_segments_into_one_call(monkeypatch):

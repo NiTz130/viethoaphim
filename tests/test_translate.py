@@ -99,8 +99,8 @@ def test_parse_translation_response_identifies_bad_item():
         parse_translation_response('{"translations": ["not an object"]}')
 
 
-def test_parse_translation_response_warns_and_coerces_invalid_status(capsys):
-    """H4 fix: LLM returns an invalid status; we log to stderr AND coerce to 'draft'."""
+def test_parse_translation_response_warns_and_coerces_invalid_status(caplog):
+    """H4 fix: LLM returns an invalid status; we log a warning AND coerce to 'draft'."""
     payload = json.dumps(
         {
             "translations": [
@@ -121,9 +121,11 @@ def test_parse_translation_response_warns_and_coerces_invalid_status(capsys):
     rows = parse_translation_response(payload)
 
     assert rows[0].status == "draft"
-    captured = capsys.readouterr()
-    assert "invalid status" in captured.err
-    assert "m-0001" in captured.err
+    warnings = [r for r in caplog.records if r.name == "vietdub.translate" and r.levelname == "WARNING"]
+    assert warnings, "Expected at least one WARNING log from vietdub.translate"
+    msg = warnings[0].getMessage()
+    assert "invalid status" in msg
+    assert "m-0001" in msg
 
 
 def _valid_translations_payload():
@@ -323,8 +325,8 @@ def test_translate_pipeline_produces_valid_response():
     monkey.undo()
 
 
-def test_parse_translation_response_warns_on_oversized_translation(capsys):
-    """Translation > 120% of target emits [LEN WARNING] to stderr."""
+def test_parse_translation_response_warns_on_oversized_translation(caplog):
+    """Translation > 120% of target emits [LEN WARNING] to the logger."""
     payload = json.dumps({
         "translations": [{
             "segment_id": "m-0042",
@@ -338,14 +340,16 @@ def test_parse_translation_response_warns_on_oversized_translation(capsys):
         }]
     })
     parse_translation_response(payload)
-    captured = capsys.readouterr()
-    assert "[LEN WARNING]" in captured.err
-    assert "m-0042" in captured.err
-    assert "over" in captured.err
+    warnings = [r for r in caplog.records if r.name == "vietdub.translate" and r.levelname == "WARNING"]
+    assert warnings, "Expected at least one WARNING log from vietdub.translate"
+    msg = warnings[0].getMessage()
+    assert "[LEN WARNING]" in msg
+    assert "m-0042" in msg
+    assert "over" in msg
 
 
-def test_parse_translation_response_warns_on_undersized_translation(capsys):
-    """Translation < 80% of target emits [LEN WARNING] to stderr."""
+def test_parse_translation_response_warns_on_undersized_translation(caplog):
+    """Translation < 80% of target emits [LEN WARNING] to the logger."""
     payload = json.dumps({
         "translations": [{
             "segment_id": "m-0099",
@@ -359,13 +363,15 @@ def test_parse_translation_response_warns_on_undersized_translation(capsys):
         }]
     })
     parse_translation_response(payload)
-    captured = capsys.readouterr()
-    assert "[LEN WARNING]" in captured.err
-    assert "m-0099" in captured.err
-    assert "under" in captured.err
+    warnings = [r for r in caplog.records if r.name == "vietdub.translate" and r.levelname == "WARNING"]
+    assert warnings, "Expected at least one WARNING log from vietdub.translate"
+    msg = warnings[0].getMessage()
+    assert "[LEN WARNING]" in msg
+    assert "m-0099" in msg
+    assert "under" in msg
 
 
-def test_parse_translation_response_no_warn_within_tolerance(capsys):
+def test_parse_translation_response_no_warn_within_tolerance(caplog):
     """Translation within \u00b120% of target emits no [LEN WARNING]."""
     payload = json.dumps({
         "translations": [{
@@ -380,11 +386,13 @@ def test_parse_translation_response_no_warn_within_tolerance(capsys):
         }]
     })
     parse_translation_response(payload)
-    captured = capsys.readouterr()
-    assert "[LEN WARNING]" not in captured.err
+    warnings = [r for r in caplog.records if r.name == "vietdub.translate" and r.levelname == "WARNING"]
+    assert not [w for w in warnings if "[LEN WARNING]" in w.getMessage()], (
+        f"Expected no [LEN WARNING] within tolerance, got: {[w.getMessage() for w in warnings]}"
+    )
 
 
-def test_parse_translation_response_skips_length_check_for_empty_translation(capsys):
+def test_parse_translation_response_skips_length_check_for_empty_translation(caplog):
     """Empty text_vi is not length-checked (would always 'under')."""
     payload = json.dumps({
         "translations": [{
@@ -401,11 +409,11 @@ def test_parse_translation_response_skips_length_check_for_empty_translation(cap
     rows = parse_translation_response(payload)
     assert len(rows) == 1
     assert rows[0].text_vi == ""
-    captured = capsys.readouterr()
-    assert "[LEN WARNING]" not in captured.err
+    warnings = [r for r in caplog.records if r.name == "vietdub.translate" and r.levelname == "WARNING"]
+    assert not [w for w in warnings if "[LEN WARNING]" in w.getMessage()]
 
 
-def test_parse_translation_response_skips_length_check_for_very_short_segments(capsys):
+def test_parse_translation_response_skips_length_check_for_very_short_segments(caplog):
     """Segments with target < 10 chars (floor region) skip length check."""
     payload = json.dumps({
         "translations": [{
@@ -421,8 +429,8 @@ def test_parse_translation_response_skips_length_check_for_very_short_segments(c
     })
     rows = parse_translation_response(payload)
     assert len(rows) == 1
-    captured = capsys.readouterr()
-    assert "[LEN WARNING]" not in captured.err
+    warnings = [r for r in caplog.records if r.name == "vietdub.translate" and r.levelname == "WARNING"]
+    assert not [w for w in warnings if "[LEN WARNING]" in w.getMessage()]
 
 
 def test_extract_terms_from_translations_finds_chinese_names():
@@ -900,7 +908,7 @@ def test_load_helpers_resilient_to_missing_files(tmp_path):
     assert _load_ignore_list(tmp_path) == []
 
 
-def test_translate_warns_and_falls_back_when_pronouns_unavailable(monkeypatch, capsys):
+def test_translate_warns_and_falls_back_when_pronouns_unavailable(monkeypatch, caplog):
     """H2 fix: when reference data fails to load, we still get a translation
     but the user sees a Warning on stderr so the failure is diagnosable."""
     from vietdub import translate as translate_mod
@@ -967,15 +975,17 @@ def test_translate_warns_and_falls_back_when_pronouns_unavailable(monkeypatch, c
         settings=settings,
     )
     assert len(rows) == 1
-    captured = capsys.readouterr()
-    assert "Warning" in captured.err
-    assert "RuntimeError" in captured.err
-    assert "disk full" in captured.err
+    warnings = [r for r in caplog.records if r.name == "vietdub.translate" and r.levelname == "WARNING"]
+    assert warnings, "Expected at least one WARNING log from vietdub.translate"
+    msg = warnings[0].getMessage()
+    assert "Warning" in msg
+    assert "RuntimeError" in msg
+    assert "disk full" in msg
 
 
-def test_load_initial_glossary_warns_and_returns_empty_when_file_missing(monkeypatch, capsys):
+def test_load_initial_glossary_warns_and_returns_empty_when_file_missing(monkeypatch, caplog):
     """H2 fix: when the initial glossary load fails, fall back to empty
-    dict but emit a Warning on stderr."""
+    dict but emit a Warning on the logger."""
     from vietdub import translate as translate_mod
 
     monkeypatch.setattr(
@@ -985,13 +995,15 @@ def test_load_initial_glossary_warns_and_returns_empty_when_file_missing(monkeyp
 
     glossary = translate_mod._load_initial_glossary()
     assert glossary == {}
-    captured = capsys.readouterr()
-    assert "Warning" in captured.err
-    assert "OSError" in captured.err
-    assert "permission denied" in captured.err
+    warnings = [r for r in caplog.records if r.name == "vietdub.translate" and r.levelname == "WARNING"]
+    assert warnings, "Expected at least one WARNING log from vietdub.translate"
+    msg = warnings[0].getMessage()
+    assert "Warning" in msg
+    assert "OSError" in msg
+    assert "permission denied" in msg
 
 
-def test_translate_warns_once_for_unknown_model(monkeypatch, capsys):
+def test_translate_warns_once_for_unknown_model(monkeypatch, caplog):
     """H4 fix: unknown-model warning appears only once per process per model."""
     from vietdub import translate as translate_mod
     from vietdub.translate import translate_with_llm, _warned_unknown_caps
@@ -1055,13 +1067,24 @@ def test_translate_warns_once_for_unknown_model(monkeypatch, capsys):
 
     # First call: should warn.
     translate_with_llm(segs, {}, settings=settings)
-    captured1 = capsys.readouterr()
-    warning_count_1 = captured1.err.count("not in KNOWN_MODEL_OUTPUT_CAPS")
+    first_call_warnings = [
+        r for r in caplog.records
+        if r.name == "vietdub.translate"
+        and r.levelname == "WARNING"
+        and "not in KNOWN_MODEL_OUTPUT_CAPS" in r.getMessage()
+    ]
+    warning_count_1 = len(first_call_warnings)
 
     # Second call: should NOT warn again.
+    caplog.clear()
     translate_with_llm(segs, {}, settings=settings)
-    captured2 = capsys.readouterr()
-    warning_count_2 = captured2.err.count("not in KNOWN_MODEL_OUTPUT_CAPS")
+    second_call_warnings = [
+        r for r in caplog.records
+        if r.name == "vietdub.translate"
+        and r.levelname == "WARNING"
+        and "not in KNOWN_MODEL_OUTPUT_CAPS" in r.getMessage()
+    ]
+    warning_count_2 = len(second_call_warnings)
 
     assert warning_count_1 == 1, f"Expected 1 warning on first call, got {warning_count_1}"
     assert warning_count_2 == 0, f"Expected 0 warnings on second call, got {warning_count_2}"
@@ -1072,7 +1095,7 @@ def test_translate_warns_once_for_unknown_model(monkeypatch, capsys):
     assert unknown_model in translate_mod._warned_unknown_caps
 
 
-def test_translate_known_model_emits_no_cap_warning(monkeypatch, capsys):
+def test_translate_known_model_emits_no_cap_warning(monkeypatch, caplog):
     """H4 sanity: known models (MiniMax-M3) do not emit the unknown-cap warning."""
     from vietdub import translate as translate_mod
     from vietdub.translate import translate_with_llm
@@ -1129,7 +1152,12 @@ def test_translate_known_model_emits_no_cap_warning(monkeypatch, capsys):
     )
     segs = [TimedSegment(id="m-0001", start_ms=0, end_ms=1000, text="hello")]
     translate_with_llm(segs, {}, settings=settings)
-    captured = capsys.readouterr()
-    assert "not in KNOWN_MODEL_OUTPUT_CAPS" not in captured.err
+    cap_warnings = [
+        r for r in caplog.records
+        if r.name == "vietdub.translate"
+        and r.levelname == "WARNING"
+        and "not in KNOWN_MODEL_OUTPUT_CAPS" in r.getMessage()
+    ]
+    assert not cap_warnings, f"Expected no cap warning for known model, got: {[w.getMessage() for w in cap_warnings]}"
 
 

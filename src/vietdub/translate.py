@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import re
 import sys
@@ -13,6 +14,9 @@ from pydantic import ValidationError
 
 from .models import TimedSegment, TranslationRow
 from .reference import find_reference_data_dir, load_dictionary_entries
+
+
+logger = logging.getLogger(__name__)
 
 
 CSV_FIELDS = [
@@ -105,17 +109,15 @@ def _warn_oversized_translations(rows: list[TranslationRow]) -> None:
             continue
         if text_len > target * (1 + LENGTH_TOLERANCE):
             over_pct = int((text_len / target - 1) * 100)
-            print(
+            logger.warning(
                 f"[LEN WARNING] segment {row.segment_id}: {text_len} chars vs target {target} "
-                f"({over_pct}% over). Vietnamese translation may exceed dubbing timing.",
-                file=sys.stderr,
+                f"({over_pct}% over). Vietnamese translation may exceed dubbing timing."
             )
         elif text_len < target * (1 - LENGTH_TOLERANCE):
             under_pct = int((1 - text_len / target) * 100)
-            print(
+            logger.warning(
                 f"[LEN WARNING] segment {row.segment_id}: {text_len} chars vs target {target} "
-                f"({under_pct}% under). Vietnamese translation may read too fast for dubbing.",
-                file=sys.stderr,
+                f"({under_pct}% under). Vietnamese translation may read too fast for dubbing."
             )
 
 
@@ -178,10 +180,9 @@ def parse_translation_response(
         if not isinstance(item, dict):
             raise RuntimeError(f"Invalid LLM translation response: translation item {index} is not an object")
         if item.get("status") not in ALLOWED_REVIEW_STATUSES:
-            print(
+            logger.warning(
                 f"Warning: LLM returned invalid status {item.get('status')!r} "
-                f"for segment {item.get('segment_id')!r}; coercing to 'draft'",
-                file=sys.stderr,
+                f"for segment {item.get('segment_id')!r}; coercing to 'draft'"
             )
             item = {**item, "status": "draft"}
         try:
@@ -287,11 +288,10 @@ def translate_with_llm(
         )
     if cap is None and settings.llm_model not in _warned_unknown_caps:
         _warned_unknown_caps.add(settings.llm_model)
-        print(
+        logger.warning(
             f"Warning: model {settings.llm_model!r} not in KNOWN_MODEL_OUTPUT_CAPS; "
             f"skipping output cap validation (warning shown once per model). "
-            f"If you hit truncation, add the model's output cap to the dict.",
-            file=sys.stderr,
+            f"If you hit truncation, add the model's output cap to the dict."
         )
 
     glossary: dict[str, str] = dict(_load_initial_glossary())
@@ -305,9 +305,8 @@ def translate_with_llm(
         phrase_patterns = _load_phrase_patterns(ref_dir)
         ignore_list = _load_ignore_list(ref_dir)
     except Exception as exc:
-        print(
-            f"Warning: failed to load reference data: {type(exc).__name__}: {exc}",
-            file=sys.stderr,
+        logger.warning(
+            f"Warning: failed to load reference data: {type(exc).__name__}: {exc}"
         )
         pronoun_guide = []
         phrase_patterns = []
@@ -345,9 +344,8 @@ def _load_initial_glossary() -> dict[str, str]:
         ref_dir = find_reference_data_dir(ref_root)
         glossary = load_dictionary_entries(ref_dir / "Names.txt")
     except Exception as exc:
-        print(
-            f"Warning: failed to load initial glossary: {type(exc).__name__}: {exc}",
-            file=sys.stderr,
+        logger.warning(
+            f"Warning: failed to load initial glossary: {type(exc).__name__}: {exc}"
         )
         glossary = {}
     return glossary
