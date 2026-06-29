@@ -10,8 +10,6 @@ from .context import build_context_bundle
 from .jobs import Job, JobManager
 from .merge import merge_segments
 from .models import StepName, TimedSegment, TranslationRow
-from .ocr import FixtureOcrEngine
-from .stt import FixtureSttEngine
 from .translate import export_review_csv
 
 
@@ -23,6 +21,8 @@ def write_segments(job: Job, relative: str, segments: list[TimedSegment]) -> Non
 
 
 def run_fixture_pipeline(video: Path, jobs_dir: Path, stt_fixture: Path, ocr_fixture: Path) -> Job:
+    from .ocr import FixtureOcrEngine
+    from .stt import FixtureSttEngine
     job = JobManager(jobs_dir).create(video, series=None)
     stt_segments = FixtureSttEngine(stt_fixture).transcribe(job.root / "audio" / "original.wav")
     ocr_segments = FixtureOcrEngine(ocr_fixture).recognize(job.input_video)
