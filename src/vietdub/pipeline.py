@@ -68,7 +68,10 @@ def run_review_pipeline(video: Path, jobs_dir: Path, series: str | None, setting
     write_segments(job, "stt/segments.json", stt_segments)
     job.mark_done(StepName.STT, {"segments": len(stt_segments), "path": str(job.root / "stt" / "segments.json")})
 
-    ocr_segments = PaddleSubtitleOcrEngine().recognize(job.input_video)
+    ocr_segments = PaddleSubtitleOcrEngine(
+        use_gpu=typed_settings.ocr_use_gpu,
+        enable_mkldnn=typed_settings.ocr_enable_mkldnn,
+    ).recognize(job.input_video)
     write_segments(job, "ocr/subtitles.json", ocr_segments)
     job.mark_done(StepName.OCR, {"segments": len(ocr_segments), "path": str(job.root / "ocr" / "subtitles.json")})
 

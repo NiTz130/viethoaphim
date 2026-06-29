@@ -68,3 +68,41 @@ def test_run_pipeline_ocr_converts_timed_segments(monkeypatch):
     assert not hasattr(seg, "source")
     assert not hasattr(seg, "speaker")
     assert not hasattr(seg, "meta")
+
+
+def test_ocr_engine_propagates_use_gpu_to_paddleocr(monkeypatch):
+    """M7: Settings.ocr_use_gpu is passed to PaddleSubtitleOcrEngine and then
+    to the underlying PaddleOCR constructor."""
+    from vietdub.ocr import PaddleSubtitleOcrEngine
+
+    captured_kwargs: dict = {}
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+
+        def ocr(self, frame, cls=True):
+            return [[[[[0, 0], [1, 1]], ("hi", 0.99)]]]
+
+    import sys, types
+    fake_paddleocr = types.ModuleType("paddleocr")
+    fake_paddleocr.PaddleOCR = FakePaddleOCR
+    monkeypatch.setitem(sys.modules, "paddleocr", fake_paddleocr)
+    monkeypatch.setattr("vietdub.ocr.paddle._guard_optional_torch_import", lambda: None)
+    # Mock ffmpeg subprocess so the test doesn't need a real video.
+    fake_completed = type("C", (), {"returncode": 0, "stderr": "", "stdout": ""})()
+    monkeypatch.setattr(
+        "vietdub.ocr.paddle.subprocess.run",
+        lambda *args, **kwargs: fake_completed,
+    )
+
+    video_path = __import__("pathlib").Path("/tmp/fake.mp4")
+
+    # use_gpu=True
+    PaddleSubtitleOcrEngine(sample_every_seconds=0.5, use_gpu=True).recognize(video_path)
+    assert captured_kwargs["use_gpu"] is True
+
+    # use_gpu=False (default)
+    captured_kwargs.clear()
+    PaddleSubtitleOcrEngine(sample_every_seconds=0.5).recognize(video_path)
+    assert captured_kwargs["use_gpu"] is False

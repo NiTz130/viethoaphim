@@ -28,15 +28,28 @@ def _clear_generated_ocr_frames(frame_dir: Path) -> None:
 
 
 class PaddleSubtitleOcrEngine:
-    def __init__(self, sample_every_seconds: float = 0.5) -> None:
+    def __init__(
+        self,
+        sample_every_seconds: float = 0.5,
+        use_gpu: bool = False,
+        enable_mkldnn: bool = False,
+    ) -> None:
         self.sample_every_seconds = sample_every_seconds
+        self.use_gpu = use_gpu
+        self.enable_mkldnn = enable_mkldnn
 
     def recognize(self, video_path: Path) -> list[TimedSegment]:
         os.environ.setdefault("FLAGS_use_mkldnn", "0")
         _guard_optional_torch_import()
         from paddleocr import PaddleOCR
 
-        ocr = PaddleOCR(use_angle_cls=True, lang="ch", show_log=False, use_gpu=False, enable_mkldnn=False)
+        ocr = PaddleOCR(
+            use_angle_cls=True,
+            lang="ch",
+            show_log=False,
+            use_gpu=self.use_gpu,
+            enable_mkldnn=self.enable_mkldnn,
+        )
         frame_dir = video_path.parent / "ocr_frames"
         frame_dir.mkdir(parents=True, exist_ok=True)
         _clear_generated_ocr_frames(frame_dir)

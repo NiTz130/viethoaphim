@@ -19,3 +19,5 @@ class Settings(BaseSettings):
     jobs_dir: str = "jobs"
     reference_data_dir: str = "data"
     sample_rate: int = 44_100
+    ocr_use_gpu: bool = False
+    ocr_enable_mkldnn: bool = False
