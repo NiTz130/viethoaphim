@@ -1,10 +1,36 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
 from .models import TranslationRow
+
+_TTS_BASE_URL_ALLOWLIST: frozenset[str] = frozenset({
+    "api.minimax.io",
+    "localhost",       # local dev
+    "127.0.0.1",       # local dev
+})
+
+
+def _validate_tts_base_url(url: str) -> None:
+    """Reject base_url values that don't match scheme + host allowlist.
+
+    Prevents accidental or malicious redirection of TTS API calls
+    (which would exfiltrate the API key via Authorization header).
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    if parsed.scheme != "https" and host not in {"localhost", "127.0.0.1"}:
+        raise ValueError(
+            f"TTS_BASE_URL must use https (got scheme={parsed.scheme!r})"
+        )
+    if host not in _TTS_BASE_URL_ALLOWLIST:
+        raise ValueError(
+            f"TTS_BASE_URL host {host!r} not in allowlist "
+            f"{sorted(_TTS_BASE_URL_ALLOWLIST)}"
+        )
 
 
 class MiniMaxTtsEngine:
@@ -16,6 +42,7 @@ class MiniMaxTtsEngine:
         model: str = "speech-2.8-hd",
         timeout: float = 30.0,
     ) -> None:
+        _validate_tts_base_url(base_url)
         self.voice_id = voice_id
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")

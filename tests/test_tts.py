@@ -115,7 +115,7 @@ async def test_minimax_tts_engine_raises_on_http_error(tmp_path, monkeypatch):
     import httpx
     monkeypatch.setattr(httpx, "AsyncClient", _BoomClient)
 
-    engine = MiniMaxTtsEngine(voice_id="v", api_key="bad", base_url="https://x")
+    engine = MiniMaxTtsEngine(voice_id="v", api_key="bad", base_url="https://api.minimax.io/v1")
     with pytest.raises(RuntimeError, match="HTTP 401"):
         await engine.synthesize_segment(_row(), tmp_path / "out.mp3")
 
@@ -128,7 +128,7 @@ async def test_minimax_tts_engine_raises_on_baseresp_error(tmp_path, monkeypatch
     }
     _install_fake_httpx(monkeypatch, payload)
 
-    engine = MiniMaxTtsEngine(voice_id="bad", api_key="k", base_url="https://x")
+    engine = MiniMaxTtsEngine(voice_id="bad", api_key="k", base_url="https://api.minimax.io/v1")
     with pytest.raises(RuntimeError, match="voice not found"):
         await engine.synthesize_segment(_row(), tmp_path / "out.mp3")
 
@@ -151,14 +151,14 @@ async def test_minimax_tts_engine_raises_on_network_error(tmp_path, monkeypatch)
 
     monkeypatch.setattr("httpx.AsyncClient", _BoomClient)
 
-    engine = MiniMaxTtsEngine(voice_id="v", api_key="k", base_url="https://x")
+    engine = MiniMaxTtsEngine(voice_id="v", api_key="k", base_url="https://api.minimax.io/v1")
     with pytest.raises(RuntimeError, match="network error"):
         await engine.synthesize_segment(_row(), tmp_path / "out.mp3")
 
 
 @pytest.mark.asyncio
 async def test_minimax_tts_engine_raises_when_api_key_missing(tmp_path):
-    engine = MiniMaxTtsEngine(voice_id="v", api_key="", base_url="https://x")
+    engine = MiniMaxTtsEngine(voice_id="v", api_key="", base_url="https://api.minimax.io/v1")
     with pytest.raises(RuntimeError, match="TTS_API_KEY is required"):
         await engine.synthesize_segment(_row(), tmp_path / "out.mp3")
 
@@ -182,3 +182,30 @@ async def test_minimax_tts_engine_appends_t2a_v2_to_base_url(tmp_path, monkeypat
     await engine.synthesize_segment(_row(), tmp_path / "out.mp3")
 
     assert fake.post_calls[0]["url"] == "https://api.minimax.io/v1/t2a_v2"
+
+
+def test_validate_tts_base_url_accepts_https_allowlisted():
+    from vietdub.tts import _validate_tts_base_url
+    # Should not raise.
+    _validate_tts_base_url("https://api.minimax.io/v1")
+
+
+def test_validate_tts_base_url_rejects_http():
+    import pytest
+    from vietdub.tts import _validate_tts_base_url
+    with pytest.raises(ValueError, match="https"):
+        _validate_tts_base_url("http://api.minimax.io/v1")
+
+
+def test_validate_tts_base_url_rejects_unknown_host():
+    import pytest
+    from vietdub.tts import _validate_tts_base_url
+    with pytest.raises(ValueError, match="not in allowlist"):
+        _validate_tts_base_url("https://attacker.example.com/v1")
+
+
+def test_validate_tts_base_url_allows_localhost():
+    from vietdub.tts import _validate_tts_base_url
+    # Both http and https to localhost should pass.
+    _validate_tts_base_url("http://localhost:8000/v1")
+    _validate_tts_base_url("http://127.0.0.1:8000/v1")
