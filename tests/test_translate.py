@@ -1065,6 +1065,11 @@ def test_translate_warns_once_for_unknown_model(monkeypatch, capsys):
 
     assert warning_count_1 == 1, f"Expected 1 warning on first call, got {warning_count_1}"
     assert warning_count_2 == 0, f"Expected 0 warnings on second call, got {warning_count_2}"
+    # Direct mechanism check: the model name should be in the warned set
+    # after the first call, so a future refactor that uses a different
+    # dedup mechanism (e.g., lru_cache) would still need to satisfy this
+    # invariant.
+    assert unknown_model in translate_mod._warned_unknown_caps
 
 
 def test_translate_known_model_emits_no_cap_warning(monkeypatch, capsys):
