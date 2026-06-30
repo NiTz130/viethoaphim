@@ -43,11 +43,15 @@ class PaddleSubtitleOcrEngine:
         _guard_optional_torch_import()
         from paddleocr import PaddleOCR
 
+        # PaddleOCR 3.x (paddlex-backed) dropped legacy kwargs `use_angle_cls`,
+        # `show_log`, and `use_gpu`. Angle classifier is now exposed as
+        # `use_textline_orientation`; device selection moved to `device`.
         ocr = PaddleOCR(
-            use_angle_cls=True,
             lang="ch",
-            show_log=False,
-            use_gpu=self.use_gpu,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=True,
+            device="gpu" if self.use_gpu else "cpu",
             enable_mkldnn=self.enable_mkldnn,
         )
         frame_dir = video_path.parent / "ocr_frames"
@@ -69,12 +73,18 @@ class PaddleSubtitleOcrEngine:
 
         segments: list[TimedSegment] = []
         for index, frame in enumerate(sorted(frame_dir.glob("frame_*.jpg")), start=1):
-            ocr_result = ocr.ocr(str(frame), cls=True)
+            ocr_results = ocr.predict(str(frame))
             texts: list[str] = []
-            for page in ocr_result or []:
-                for line in page or []:
-                    if len(line) >= 2 and line[1][0]:
-                        texts.append(str(line[1][0]).strip())
+            for page in ocr_results or []:
+                rec_texts: list[str] = []
+                page_json = getattr(page, "json", None)
+                if isinstance(page_json, dict):
+                    inner = page_json.get("res") if isinstance(page_json.get("res"), dict) else None
+                    if isinstance(inner, dict):
+                        rec_texts = inner.get("rec_texts") or []
+                for text in rec_texts:
+                    if text:
+                        texts.append(str(text).strip())
             text = "".join(texts).strip()
             if text:
                 start_ms = int((index - 1) * self.sample_every_seconds * 1000)

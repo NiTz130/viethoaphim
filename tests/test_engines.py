@@ -39,12 +39,17 @@ def test_paddle_ocr_engine_clears_stale_frames_before_extract(monkeypatch, tmp_p
     keep_file.write_text("keep", encoding="utf-8")
     observed_before_extract = {}
 
+    class _FakeOcrResult:
+        # Mimic PaddleOCR 3.x predict() result shape: page.json["res"]["rec_texts"].
+        def __init__(self, rec_texts):
+            self.json = {"res": {"rec_texts": rec_texts}}
+
     class FakePaddleOCR:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-        def ocr(self, frame, cls=True):
-            return [[[[[0, 0], [1, 1]], ("\u4f60\u597d", 0.99)]]]
+        def predict(self, frame):
+            return [_FakeOcrResult(["\u4f60\u597d"])]
 
     fake_paddleocr = types.ModuleType("paddleocr")
     fake_paddleocr.PaddleOCR = FakePaddleOCR

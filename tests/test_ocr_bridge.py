@@ -72,7 +72,7 @@ def test_run_pipeline_ocr_converts_timed_segments(monkeypatch):
 
 def test_ocr_engine_propagates_use_gpu_to_paddleocr(monkeypatch):
     """M7: Settings.ocr_use_gpu is passed to PaddleSubtitleOcrEngine and then
-    to the underlying PaddleOCR constructor."""
+    to the underlying PaddleOCR constructor as device='gpu'|'cpu'."""
     from vietdub.ocr import PaddleSubtitleOcrEngine
 
     captured_kwargs: dict = {}
@@ -81,8 +81,8 @@ def test_ocr_engine_propagates_use_gpu_to_paddleocr(monkeypatch):
         def __init__(self, **kwargs):
             captured_kwargs.update(kwargs)
 
-        def ocr(self, frame, cls=True):
-            return [[[[[0, 0], [1, 1]], ("hi", 0.99)]]]
+        def predict(self, frame):
+            return [type("R", (), {"json": {"res": {"rec_texts": ["hi"]}}})()]
 
     import sys, types
     fake_paddleocr = types.ModuleType("paddleocr")
@@ -98,11 +98,11 @@ def test_ocr_engine_propagates_use_gpu_to_paddleocr(monkeypatch):
 
     video_path = __import__("pathlib").Path("/tmp/fake.mp4")
 
-    # use_gpu=True
+    # use_gpu=True -> device="gpu"
     PaddleSubtitleOcrEngine(sample_every_seconds=0.5, use_gpu=True).recognize(video_path)
-    assert captured_kwargs["use_gpu"] is True
+    assert captured_kwargs["device"] == "gpu"
 
-    # use_gpu=False (default)
+    # use_gpu=False (default) -> device="cpu"
     captured_kwargs.clear()
     PaddleSubtitleOcrEngine(sample_every_seconds=0.5).recognize(video_path)
-    assert captured_kwargs["use_gpu"] is False
+    assert captured_kwargs["device"] == "cpu"
