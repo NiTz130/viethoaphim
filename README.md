@@ -202,6 +202,36 @@ Job hiện tại được loại khỏi quá trình quét bộ nhớ để trán
 - `review.csv` phải giữ đủ các cột: `segment_id`, `start_ms`, `end_ms`, `speaker`, `text_cn`, `text_vi`, `context_note`, `status`.
 - `segment_id` trong CSV phải tồn tại trong `transcript\merged.json` nếu file này có sẵn.
 
+## Recovery & Maintenance Scripts
+
+Một số script trong `scripts/` để xử lý các tình huống đặc biệt sau khi job đã chạy:
+
+| Script | Mục đích |
+|---|---|
+| `dedupe_merged.py` | Gộp các đoạn transcript liên tiếp có cùng `text` để fix lỗi TTS nói lặp 4-5 lần cùng 1 câu (do OCR sample 0.5s/sample không dedupe). Sau khi chạy, dùng `vietdub resume <job> --from tts`. |
+| `recover_translate.py` | Re-run LLM translate cho 1 job đã fail ở bước translate (ví dụ LLM trả về response thiếu field). Fallback `[CHƯA DỊCH] <text_cn>` cho câu LLM vẫn fail. |
+| `rewrite_review_csv.py` | Regenerate `review.csv` từ `translated.json` + `merged.json` qua `export_review_csv()` chính thức (giữ quoting đúng cho field có dấu phẩy/newline). |
+| `skip_fallback_rows.py` | Đặt `status=skip` cho các dòng có `text_vi` bắt đầu bằng `[CHƯA DỊCH]` trong `review.csv`. |
+| `fix_csv_double_bom.py` | Sửa `review.csv` bị double UTF-8 BOM (do `utf-8-sig` ghi vào file đã có BOM). |
+| `find_duplicates.py` | Debug: in ra các segment overlap/duplicate text trong `merged.json`. |
+| `check_first_segments.py` | Debug: in 20 segment đầu + thống kê overlap/duplicate. |
+| `verify_final.py` | Verify `preview_vi.mp4`: duration, sync_report, SRT overlap, audio header. |
+| `inspect_csv.py` | Debug: in row đầu của `review.csv` + test re-import. |
+| `sample_translations.py` | Debug: in 10 bản dịch đầu + đếm fallback rows. |
+
+Ví dụ workflow khi TTS bị lặp câu:
+
+```powershell
+.venv\Scripts\python.exe scripts\dedupe_merged.py 'jobs\Tập 1-9'
+.venv\Scripts\vietdub.exe resume 'jobs\Tập 1-9' --from tts
+```
+
+## Known Issues & Fixes
+
+- **TTS nói lặp 4-5 lần cùng 1 câu**: do `merge_segments` giữ tất cả OCR sample (mỗi 0.5s) của cùng 1 subtitle → transcript có 4-5 entries giống nhau. Fix: chạy `dedupe_merged.py` rồi resume `--from tts`. Đã reproduce trên `Tập 1.mp4`: 617 → 280 segments (-55%).
+- **LLM translate fail vì response thiếu `text_vi`**: MiniMax-M3 thỉnh thoảng trả về item không có field `text_vi`. Hiện tại không có auto-retry; phải chạy `recover_translate.py` để re-translate với fallback.
+- **Windows console cp1252 không in được tiếng Việt**: chạy với `$env:PYTHONIOENCODING='utf-8'` trước.
+
 ## Test
 
 Chạy test từ thư mục gốc repo:
