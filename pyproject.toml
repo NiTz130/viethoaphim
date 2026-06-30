@@ -39,8 +39,7 @@ Homepage = "https://github.com/NiTz130/viethoaphim"
 Issues = "https://github.com/NiTz130/viethoaphim/issues"
 Changelog = "https://github.com/NiTz130/viethoaphim/blob/main/CHANGELOG.md"
 
-# Hybrid pinning — see docs/superpowers/specs/2026-06-29-numpy-stack-upgrade-design.md
-# Bounded compatibility ranges (both floor and ceiling).
+# Hybrid pinning — bounded compatibility ranges (both floor and ceiling).
 # Ceilings prevent drift into known-broken versions.
 dependencies = [
   # Core

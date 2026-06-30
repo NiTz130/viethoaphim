@@ -3,8 +3,7 @@
 ## Unreleased
 
 ### Changed
-- Migrated to paddlepaddle 3.x + numpy 2.x + torch 2.6+ stack.
-  See `docs/superpowers/specs/2026-06-29-numpy-stack-upgrade-design.md`.
+- Migrated to paddlepaddle 3.x + numpy 2.x + torch 2.6+ stack (hybrid pinning — see pyproject.toml comments).
 
 ### Added
 - OCR regression harness (`make ocr-diff`, `make ocr-baseline`).
