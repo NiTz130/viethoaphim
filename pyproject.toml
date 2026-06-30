@@ -6,7 +6,39 @@ build-backend = "setuptools.build_meta"
 name = "vietdub"
 version = "0.1.0"
 description = "Windows-first CLI for Chinese-to-Vietnamese cartoon dubbing"
+readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Nguyễn Lê Đức Bình" },
+]
+keywords = [
+  "vietnamese", "dubbing", "tts", "ocr", "whisper",
+  "paddleocr", "translation", "cli", "subtitles", "srt",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Natural Language :: Chinese (Simplified)",
+  "Natural Language :: Vietnamese",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Text Processing :: Linguistic",
+]
+
+[project.urls]
+Homepage = "https://github.com/NiTz130/viethoaphim"
+Issues = "https://github.com/NiTz130/viethoaphim/issues"
+Changelog = "https://github.com/NiTz130/viethoaphim/blob/main/CHANGELOG.md"
+
 # Hybrid pinning — see docs/superpowers/specs/2026-06-29-numpy-stack-upgrade-design.md
 # Bounded compatibility ranges (both floor and ceiling).
 # Ceilings prevent drift into known-broken versions.
